@@ -1,0 +1,6 @@
+# Cloudflare Pages. `next build` writes the static site to ./out and Pages
+# serves it directly — there is no Worker/SSR layer, because every screen talks
+# to Supabase from the browser.
+name = "family-dashboard"
+compatibility_date = "2026-08-21"
+pages_build_output_dir = "out"
