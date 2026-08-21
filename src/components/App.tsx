@@ -12,7 +12,7 @@ function MissingConfig() {
       <h1 className="text-xl font-semibold">Supabase isn&rsquo;t configured</h1>
       <p className="text-muted mt-3 text-sm">
         This build was made without <code className="font-mono">NEXT_PUBLIC_SUPABASE_URL</code> and{" "}
-        <code className="font-mono">NEXT_PUBLIC_SUPABASE_ANON_KEY</code>. Add them to{" "}
+        <code className="font-mono">NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY</code>. Add them to{" "}
         <code className="font-mono">.env.local</code> (or to your Cloudflare Pages build
         settings) and rebuild — they are inlined at build time, so restarting alone
         will not pick them up.

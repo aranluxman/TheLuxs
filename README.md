@@ -85,10 +85,14 @@ cp .env.example .env.local
 
 ```dotenv
 NEXT_PUBLIC_SUPABASE_URL=https://your-project-ref.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_your_key
 ```
 
 Both are in **Project Settings → Data API / API Keys**.
+
+Supabase is migrating from the legacy JWT `anon` key to `sb_publishable_…` keys.
+The app accepts either — set `NEXT_PUBLIC_SUPABASE_ANON_KEY` instead if you are
+still on the old one. If both are present the publishable key wins.
 
 > These are `NEXT_PUBLIC_*`, so they are **inlined at build time**. Changing them
 > means rebuilding — restarting is not enough. If a build goes out without them,
@@ -127,9 +131,11 @@ git remote add origin https://github.com/<you>/<repo>.git
 git push -u origin main
 ```
 
-`.env.local` is gitignored, so your keys stay local; `.env.example` is committed
-as the template. If you ever do commit a key by accident, rotate it in
-**Supabase → Project Settings → API Keys** rather than just deleting the file.
+`.env.local` is gitignored, so your config stays local; `.env.example` is
+committed as the template. The publishable key is designed to ship to browsers,
+so it is not a secret — but it is still the front door to this data (see
+[Security model](#security-model)), and it can be rotated independently in
+**Supabase → Project Settings → API Keys**.
 
 ---
 
@@ -150,7 +156,7 @@ Pages then rebuilds on every push to `main`.
    - **Build output directory:** `out`
 4. **Environment variables** — add both, for *Production* **and** *Preview*:
    - `NEXT_PUBLIC_SUPABASE_URL`
-   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
 
    They must exist before the first build, because they are compiled in.
 5. **Save and Deploy.**
@@ -175,10 +181,10 @@ you will forget when you add it later.
 ## Security model
 
 The spec calls for profile *selection*, not login — so the browser only ever
-carries the Supabase **anon** key, and the RLS policies grant the `anon` role
-read/write on the seven `family_*` tables.
+carries the Supabase **publishable** key, and the RLS policies grant the `anon`
+role read/write on the seven `family_*` tables.
 
-**In practice: anyone with the site URL and the anon key can read and write this
+**In practice: anyone with the site URL and that key can read and write this
 family's data.** That is an acceptable trade for a household dashboard on a home
 network; it is not acceptable if you put the URL somewhere public.
 
