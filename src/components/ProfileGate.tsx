@@ -21,13 +21,25 @@ export function ProfileGate() {
             onClick={() => setCurrentMemberId(m.id)}
             className="border-line bg-surface flex flex-col items-center gap-3 rounded-2xl border p-6 transition-transform hover:-translate-y-0.5"
           >
-            <span
-              className="grid h-16 w-16 place-items-center rounded-full text-3xl"
-              style={{ backgroundColor: tint(m.color, 0.16) }}
-              aria-hidden
-            >
-              {m.avatar_emoji}
-            </span>
+            {m.avatar_url ? (
+              <span className="h-16 w-16 overflow-hidden rounded-full">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={m.avatar_url}
+                  alt=""
+                  className="h-full w-full object-cover"
+                  loading="lazy"
+                />
+              </span>
+            ) : (
+              <span
+                className="grid h-16 w-16 place-items-center rounded-full text-3xl"
+                style={{ backgroundColor: tint(m.color, 0.16) }}
+                aria-hidden
+              >
+                {m.avatar_emoji}
+              </span>
+            )}
             <span className="text-sm font-medium">{m.name}</span>
           </button>
         ))}

@@ -11,7 +11,9 @@ import {
   todayKey,
 } from "@/lib/dates";
 import { tint } from "@/lib/palette";
-import type { Chore, FamilyMember } from "@/lib/types";
+import type { Chore, MemberWithPhoto } from "@/lib/types";
+import { ChoreSettings } from "./ChoreSettings";
+import { TodayCard } from "./TodayCard";
 import { useFamily } from "./FamilyProvider";
 import { Avatar, Card, EmptyState, ErrorNote, SectionTitle } from "./ui";
 
@@ -22,7 +24,7 @@ function ChoreRow({
   dimmed = false,
 }: {
   chore: Chore;
-  member: FamilyMember | null;
+  member: MemberWithPhoto | null;
   onToggle: (done: boolean) => void;
   dimmed?: boolean;
 }) {
@@ -69,6 +71,7 @@ function ChoreRow({
 export function ChoresTab() {
   const { currentMember, byId } = useFamily();
   const [scope, setScope] = useState<"mine" | "everyone">("mine");
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const today = new Date();
   const from = dayKey(addDays(today, -1));
@@ -117,6 +120,8 @@ export function ChoresTab() {
     <div className="space-y-8">
       <ErrorNote message={error} />
 
+      <TodayCard />
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-semibold">{formatDayLabel(today)}</h2>
@@ -127,6 +132,14 @@ export function ChoresTab() {
           </p>
         </div>
 
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setSettingsOpen(true)}
+            className="border-line hover:bg-sunk rounded-xl border px-3 py-1.5 text-sm"
+            title="Choose who does which chore"
+          >
+            Who does what
+          </button>
         <div className="bg-sunk inline-flex rounded-xl p-1">
           {(["mine", "everyone"] as const).map((s) => (
             <button
@@ -140,6 +153,7 @@ export function ChoresTab() {
               {s}
             </button>
           ))}
+        </div>
         </div>
       </div>
 
@@ -237,6 +251,8 @@ export function ChoresTab() {
           </div>
         </section>
       ) : null}
+
+      <ChoreSettings open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   );
 }

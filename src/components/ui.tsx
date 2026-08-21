@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { tint } from "@/lib/palette";
-import type { FamilyMember } from "@/lib/types";
+import type { MemberWithPhoto } from "@/lib/types";
 
 /* ---------------------------------------------------------------- Avatar */
 
@@ -17,7 +17,7 @@ export function Avatar({
   size = "md",
   ring = false,
 }: {
-  member: Pick<FamilyMember, "avatar_emoji" | "color" | "name"> | null;
+  member: Pick<MemberWithPhoto, "avatar_emoji" | "color" | "name" | "avatar_url"> | null;
   size?: keyof typeof AVATAR_SIZES;
   ring?: boolean;
 }) {
@@ -31,13 +31,31 @@ export function Avatar({
       </span>
     );
   }
+
+  const shell = `${AVATAR_SIZES[size]} grid shrink-0 place-items-center overflow-hidden rounded-full`;
+  const shadow = ring ? `0 0 0 2px ${member.color}` : undefined;
+
+  // A real photo beats an emoji every time — that was the whole point of
+  // adding them. The emoji stays as the fallback.
+  if (member.avatar_url) {
+    return (
+      <span className={shell} style={{ boxShadow: shadow }} title={member.name}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={member.avatar_url}
+          alt={member.name}
+          className="h-full w-full object-cover"
+          loading="lazy"
+          decoding="async"
+        />
+      </span>
+    );
+  }
+
   return (
     <span
-      className={`${AVATAR_SIZES[size]} grid shrink-0 place-items-center rounded-full`}
-      style={{
-        backgroundColor: tint(member.color, 0.16),
-        boxShadow: ring ? `0 0 0 2px ${member.color}` : undefined,
-      }}
+      className={shell}
+      style={{ backgroundColor: tint(member.color, 0.16), boxShadow: shadow }}
       title={member.name}
     >
       <span aria-hidden>{member.avatar_emoji}</span>
@@ -48,7 +66,7 @@ export function Avatar({
 
 /* ------------------------------------------------------------------ Chip */
 
-export function MemberChip({ member }: { member: FamilyMember }) {
+export function MemberChip({ member }: { member: MemberWithPhoto }) {
   return (
     <span
       className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium"

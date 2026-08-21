@@ -19,6 +19,7 @@ import {
 } from "@/lib/dates";
 import { CALENDAR_CATEGORIES, tint } from "@/lib/palette";
 import type { AgendaItem, CalendarEntry, Chore, EventRsvp, FamilyEvent } from "@/lib/types";
+import { CalendarFeeds } from "./CalendarFeeds";
 import { useFamily } from "./FamilyProvider";
 import {
   Button,
@@ -71,9 +72,12 @@ function buildAgenda(
       title: c.title,
       subtitle: c.category === "general" ? null : c.category,
       day: dayKey(start),
-      start,
-      end: c.end_time ? parseISO(c.end_time) : null,
+      // All-day imports have no meaningful clock time; treat them like chores.
+      start: c.all_day ? null : start,
+      end: c.all_day ? null : c.end_time ? parseISO(c.end_time) : null,
       memberIds: c.member_id ? [c.member_id] : [],
+      allDay: c.all_day,
+      readOnly: Boolean(c.source_feed_id),
     });
   }
 
@@ -138,6 +142,7 @@ export function CalendarTab() {
   const [selected, setSelected] = useState<Date>(() => new Date());
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [open, setOpen] = useState(false);
+  const [feedsOpen, setFeedsOpen] = useState(false);
   const [saving, setSaving] = useState(false);
 
   // The chore query window follows whichever grid is on screen.
@@ -149,7 +154,13 @@ export function CalendarTab() {
   const toKey = dayKey(grid[grid.length - 1]);
 
   const { events, rsvps, error: eventsError } = useEvents();
-  const { entries, error: entriesError, createEntry, deleteEntry } = useCalendarEntries();
+  const {
+    entries,
+    error: entriesError,
+    createEntry,
+    deleteEntry,
+    reload: reloadEntries,
+  } = useCalendarEntries();
   const { chores, error: choresError } = useChores(fromKey, toKey);
 
   const [form, setForm] = useState(() => ({
@@ -267,6 +278,9 @@ export function CalendarTab() {
               </button>
             ))}
           </div>
+          <Button variant="ghost" onClick={() => setFeedsOpen(true)}>
+            Feeds
+          </Button>
           <Button onClick={() => setOpen(true)}>+ Add</Button>
         </div>
       </div>
@@ -389,7 +403,7 @@ export function CalendarTab() {
                     <div className="flex-1">
                       <AgendaRow item={i} />
                     </div>
-                    {i.kind === "entry" ? (
+                    {i.kind === "entry" && !i.readOnly ? (
                       <button
                         onClick={() => deleteEntry(i.id.replace("entry:", ""))}
                         className="text-faint h-7 w-7 shrink-0 rounded-full hover:bg-red-50 hover:text-red-700"
@@ -405,6 +419,12 @@ export function CalendarTab() {
           </Card>
         </section>
       ) : null}
+
+      <CalendarFeeds
+        open={feedsOpen}
+        onClose={() => setFeedsOpen(false)}
+        onSynced={reloadEntries}
+      />
 
       <Modal open={open} onClose={() => setOpen(false)} title="Add to the calendar">
         <form onSubmit={submit} className="space-y-4">

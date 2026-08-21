@@ -6,6 +6,7 @@ import { ChoresTab } from "./ChoresTab";
 import { EventsTab } from "./EventsTab";
 import { CalendarTab } from "./CalendarTab";
 import { ChatTab } from "./ChatTab";
+import { ProfileSheet } from "./ProfileSheet";
 import { Avatar } from "./ui";
 
 const TABS = [
@@ -20,6 +21,7 @@ type TabId = (typeof TABS)[number]["id"];
 export function Shell() {
   const { currentMember, setCurrentMemberId } = useFamily();
   const [tab, setTab] = useState<TabId>("chores");
+  const [profilesOpen, setProfilesOpen] = useState(false);
 
   return (
     <div className="flex min-h-full flex-1 flex-col">
@@ -43,14 +45,23 @@ export function Shell() {
             ))}
           </nav>
 
-          <button
-            onClick={() => setCurrentMemberId(null)}
-            className="hover:bg-sunk ml-auto flex items-center gap-2 rounded-full py-1 pr-3 pl-1 sm:ml-0"
-            title="Switch profile"
-          >
-            <Avatar member={currentMember} size="sm" ring />
-            <span className="text-sm font-medium">{currentMember?.name}</span>
-          </button>
+          <div className="ml-auto flex items-center gap-1 sm:ml-0">
+            <button
+              onClick={() => setProfilesOpen(true)}
+              className="hover:bg-sunk flex items-center gap-2 rounded-full py-1 pr-3 pl-1"
+              title="Edit profiles and photos"
+            >
+              <Avatar member={currentMember} size="sm" ring />
+              <span className="text-sm font-medium">{currentMember?.name}</span>
+            </button>
+            <button
+              onClick={() => setCurrentMemberId(null)}
+              className="text-faint hover:bg-sunk hover:text-ink rounded-full px-2 py-1 text-xs"
+              title="Switch to another profile"
+            >
+              Switch
+            </button>
+          </div>
         </div>
       </header>
 
@@ -81,6 +92,8 @@ export function Shell() {
           </button>
         ))}
       </nav>
+
+      <ProfileSheet open={profilesOpen} onClose={() => setProfilesOpen(false)} />
     </div>
   );
 }

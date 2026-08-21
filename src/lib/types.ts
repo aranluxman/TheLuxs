@@ -8,6 +8,13 @@ export interface FamilyMember {
   color: string;
   sort_order: number;
   created_at: string;
+  /** Storage object path in the `family-media` bucket, or null for emoji-only. */
+  avatar_path: string | null;
+}
+
+/** A member plus the short-lived signed URL for their photo. */
+export interface MemberWithPhoto extends FamilyMember {
+  avatar_url: string | null;
 }
 
 export interface ChoreTemplate {
@@ -62,12 +69,59 @@ export interface CalendarEntry {
   end_time: string | null;
   category: string;
   created_at: string;
+  source_feed_id: string | null;
+  source_uid: string | null;
+  all_day: boolean;
 }
+
+export type AttachmentKind = "image" | "voice" | "file";
 
 export interface Message {
   id: string;
   sender_id: string | null;
   message_text: string;
+  created_at: string;
+  attachment_path: string | null;
+  attachment_kind: AttachmentKind | null;
+  attachment_name: string | null;
+  attachment_mime: string | null;
+  attachment_size: number | null;
+  /** Seconds. Voice notes only. */
+  attachment_duration: number | null;
+  /** Set when someone removes the message; the row is kept as a tombstone. */
+  deleted_at: string | null;
+  deleted_by: string | null;
+}
+
+export interface ChoreExclusion {
+  template_id: string;
+  member_id: string;
+}
+
+export interface Quote {
+  id: string;
+  quote_text: string;
+  author: string | null;
+  is_active: boolean;
+}
+
+export interface LookingForward {
+  member_id: string;
+  note: string;
+  target_date: string | null;
+  updated_at: string;
+}
+
+export interface CalendarFeed {
+  id: string;
+  member_id: string | null;
+  name: string;
+  /** Empty string means a one-off pasted import rather than a live URL. */
+  url: string;
+  is_active: boolean;
+  last_synced_at: string | null;
+  last_error: string | null;
+  last_event_count: number | null;
   created_at: string;
 }
 
@@ -86,4 +140,7 @@ export interface AgendaItem {
   end: Date | null;
   memberIds: string[];
   done?: boolean;
+  allDay?: boolean;
+  /** Imported from a calendar feed — deleting it here would just resync back. */
+  readOnly?: boolean;
 }

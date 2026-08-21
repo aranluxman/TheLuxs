@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useMessages } from "@/hooks/useMessages";
+import { useMessages, type OutgoingAttachment } from "@/hooks/useMessages";
+import { useVoiceRecorder } from "@/hooks/useVoiceRecorder";
 import { formatChatDay, formatTime, parseISO } from "@/lib/dates";
 import { tint } from "@/lib/palette";
-import type { Message } from "@/lib/types";
+import { formatBytes, formatDuration, uploadMedia } from "@/lib/storage";
+import type { AttachmentKind, Message } from "@/lib/types";
 import { useFamily } from "./FamilyProvider";
 import { Avatar, ErrorNote } from "./ui";
 
@@ -15,9 +17,7 @@ interface Rendered {
   message: Message;
   at: Date;
   mine: boolean;
-  /** First of a run — show the avatar and name. */
   startsGroup: boolean;
-  /** Last of a run — show the timestamp and the bubble tail. */
   endsGroup: boolean;
   daySeparator: string | null;
 }
@@ -52,12 +52,104 @@ function render(messages: Message[], meId: string | null): Rendered[] {
   });
 }
 
+function kindFor(file: File): AttachmentKind {
+  return file.type.startsWith("image/") ? "image" : "file";
+}
+
+/* ------------------------------------------------------------- Attachment */
+
+function AttachmentView({
+  message,
+  url,
+  mine,
+}: {
+  message: Message;
+  url: string | undefined;
+  mine: boolean;
+}) {
+  if (!message.attachment_path || !message.attachment_kind) return null;
+
+  if (!url) {
+    return <p className="text-xs opacity-70">Loading attachment…</p>;
+  }
+
+  if (message.attachment_kind === "image") {
+    return (
+      <a href={url} target="_blank" rel="noreferrer" className="block">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={url}
+          alt={message.attachment_name ?? "Shared photo"}
+          className="max-h-72 w-full rounded-xl object-cover"
+          loading="lazy"
+        />
+      </a>
+    );
+  }
+
+  if (message.attachment_kind === "voice") {
+    return (
+      <div className="flex items-center gap-2">
+        <audio controls preload="none" src={url} className="h-9 max-w-[15rem]" />
+        {message.attachment_duration ? (
+          <span className="text-[10px] opacity-70">
+            {formatDuration(message.attachment_duration)}
+          </span>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noreferrer"
+      download={message.attachment_name ?? undefined}
+      className={`flex items-center gap-2.5 rounded-xl px-1 py-0.5 underline-offset-2 hover:underline ${
+        mine ? "text-white" : "text-ink"
+      }`}
+    >
+      <span className="text-xl" aria-hidden>
+        📎
+      </span>
+      <span className="min-w-0">
+        <span className="block truncate text-sm font-medium">
+          {message.attachment_name ?? "Attachment"}
+        </span>
+        {message.attachment_size ? (
+          <span className="block text-[10px] opacity-70">
+            {formatBytes(message.attachment_size)}
+          </span>
+        ) : null}
+      </span>
+    </a>
+  );
+}
+
+/* ------------------------------------------------------------------- Tab */
+
 export function ChatTab() {
   const { currentMember, byId } = useFamily();
-  const { messages, loading, error, sendMessage } = useMessages();
-  const [draft, setDraft] = useState("");
-  const [sending, setSending] = useState(false);
+  const {
+    messages,
+    mediaUrls,
+    loading,
+    loadingOlder,
+    hasOlder,
+    error,
+    sendMessage,
+    deleteMessage,
+    loadOlder,
+  } = useMessages();
+  const recorder = useVoiceRecorder();
 
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const pinnedToBottom = useRef(true);
 
@@ -79,27 +171,80 @@ export function ChatTab() {
     if (el && pinnedToBottom.current) el.scrollTop = el.scrollHeight;
   }, [rows.length]);
 
-  // Jump to the bottom once the history first lands.
   useEffect(() => {
     if (!loading && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [loading]);
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
+  async function submitText(e?: React.FormEvent) {
+    e?.preventDefault();
     const body = draft.trim();
     if (!body || !currentMember) return;
     setDraft("");
-    setSending(true);
     pinnedToBottom.current = true;
     await sendMessage(currentMember.id, body);
-    setSending(false);
   }
+
+  async function onFilePicked(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // let the same file be picked again later
+    if (!file || !currentMember) return;
+
+    setUploadError(null);
+    setBusy("Uploading…");
+    const uploaded = await uploadMedia(file, "chat", "bin");
+    if ("error" in uploaded) {
+      setUploadError(uploaded.error);
+      setBusy(null);
+      return;
+    }
+
+    const attachment: OutgoingAttachment = {
+      path: uploaded.path,
+      kind: kindFor(file),
+      name: file.name,
+      mime: file.type || null,
+      size: file.size,
+      duration: null,
+    };
+    pinnedToBottom.current = true;
+    await sendMessage(currentMember.id, draft.trim(), attachment);
+    setDraft("");
+    setBusy(null);
+  }
+
+  async function finishRecording() {
+    if (!currentMember) return;
+    const clip = await recorder.stop();
+    if (!clip) return;
+
+    setUploadError(null);
+    setBusy("Sending voice note…");
+    const uploaded = await uploadMedia(clip.blob, "chat", "webm");
+    if ("error" in uploaded) {
+      setUploadError(uploaded.error);
+      setBusy(null);
+      return;
+    }
+
+    pinnedToBottom.current = true;
+    await sendMessage(currentMember.id, "", {
+      path: uploaded.path,
+      kind: "voice",
+      name: "Voice note",
+      mime: clip.mime,
+      size: clip.blob.size,
+      duration: clip.duration,
+    });
+    setBusy(null);
+  }
+
+  const canSend = Boolean(currentMember) && !busy;
 
   return (
     <div className="flex h-[calc(100dvh-12.5rem)] flex-col sm:h-[calc(100dvh-9.5rem)]">
-      <ErrorNote message={error} />
+      <ErrorNote message={error ?? uploadError ?? recorder.error} />
 
       <div
         ref={scrollRef}
@@ -117,90 +262,209 @@ export function ChatTab() {
             <p className="text-xs">Say hello to the family.</p>
           </div>
         ) : (
-          rows.map((r) => {
-            const sender = r.message.sender_id ? byId[r.message.sender_id] : null;
-            return (
-              <div key={r.message.id}>
-                {r.daySeparator ? (
-                  <p className="text-faint my-4 text-center text-[11px] font-medium">
-                    {r.daySeparator}
-                  </p>
-                ) : null}
-
-                <div
-                  className={`flex items-end gap-2 ${r.mine ? "justify-end" : "justify-start"} ${
-                    r.endsGroup ? "mb-2.5" : "mb-0.5"
-                  }`}
+          <>
+            {hasOlder ? (
+              <div className="mb-4 text-center">
+                <button
+                  onClick={loadOlder}
+                  disabled={loadingOlder}
+                  className="border-line text-muted hover:bg-sunk rounded-full border px-3 py-1 text-xs"
                 >
-                  {!r.mine ? (
-                    <span className={r.endsGroup ? "" : "invisible"}>
-                      <Avatar member={sender} size="sm" />
-                    </span>
+                  {loadingOlder ? "Loading…" : "Load earlier messages"}
+                </button>
+              </div>
+            ) : null}
+
+            {rows.map((r) => {
+              const sender = r.message.sender_id ? byId[r.message.sender_id] : null;
+              const gone = Boolean(r.message.deleted_at);
+              const remover = r.message.deleted_by ? byId[r.message.deleted_by] : null;
+
+              return (
+                <div key={r.message.id}>
+                  {r.daySeparator ? (
+                    <p className="text-faint my-4 text-center text-[11px] font-medium">
+                      {r.daySeparator}
+                    </p>
                   ) : null}
 
-                  <div className={`max-w-[78%] ${r.mine ? "items-end" : "items-start"} flex flex-col`}>
-                    {!r.mine && r.startsGroup ? (
-                      <span
-                        className="mb-0.5 ml-1 text-[11px] font-semibold"
-                        style={{ color: sender?.color ?? "#78716c" }}
-                      >
-                        {sender?.name ?? "Unknown"}
+                  <div
+                    className={`group flex items-end gap-2 ${
+                      r.mine ? "justify-end" : "justify-start"
+                    } ${r.endsGroup ? "mb-2.5" : "mb-0.5"}`}
+                  >
+                    {!r.mine ? (
+                      <span className={r.endsGroup ? "" : "invisible"}>
+                        <Avatar member={sender} size="sm" />
                       </span>
                     ) : null}
 
                     <div
-                      className={`px-3.5 py-2 text-sm break-words whitespace-pre-wrap ${
-                        r.mine ? "bg-ink text-white" : "text-ink"
+                      className={`flex max-w-[78%] flex-col ${
+                        r.mine ? "items-end" : "items-start"
                       }`}
-                      style={{
-                        backgroundColor: r.mine ? undefined : tint(sender?.color ?? "#78716c", 0.13),
-                        borderRadius: 18,
-                        borderBottomRightRadius: r.mine && r.endsGroup ? 5 : 18,
-                        borderBottomLeftRadius: !r.mine && r.endsGroup ? 5 : 18,
-                      }}
                     >
-                      {r.message.message_text}
-                    </div>
+                      {!r.mine && r.startsGroup ? (
+                        <span
+                          className="mb-0.5 ml-1 text-[11px] font-semibold"
+                          style={{ color: sender?.color ?? "#78716c" }}
+                        >
+                          {sender?.name ?? "Unknown"}
+                        </span>
+                      ) : null}
 
-                    {r.endsGroup ? (
-                      <span className="text-faint mt-1 px-1 text-[10px]">
-                        {formatTime(r.at)}
+                      {gone ? (
+                        <div className="border-line text-faint rounded-2xl border border-dashed px-3.5 py-2 text-xs italic">
+                          Message deleted{remover ? ` by ${remover.name}` : ""}
+                        </div>
+                      ) : (
+                        <div
+                          className={`space-y-1.5 px-3.5 py-2 text-sm break-words whitespace-pre-wrap ${
+                            r.mine ? "bg-ink text-white" : "text-ink"
+                          }`}
+                          style={{
+                            backgroundColor: r.mine
+                              ? undefined
+                              : tint(sender?.color ?? "#78716c", 0.13),
+                            borderRadius: 18,
+                            borderBottomRightRadius: r.mine && r.endsGroup ? 5 : 18,
+                            borderBottomLeftRadius: !r.mine && r.endsGroup ? 5 : 18,
+                          }}
+                        >
+                          <AttachmentView
+                            message={r.message}
+                            url={
+                              r.message.attachment_path
+                                ? mediaUrls[r.message.attachment_path]
+                                : undefined
+                            }
+                            mine={r.mine}
+                          />
+                          {r.message.message_text ? <p>{r.message.message_text}</p> : null}
+                        </div>
+                      )}
+
+                      <span className="text-faint mt-1 flex items-center gap-2 px-1 text-[10px]">
+                        {r.endsGroup ? formatTime(r.at) : null}
+                        {!gone && currentMember ? (
+                          confirmDelete === r.message.id ? (
+                            <>
+                              <button
+                                onClick={async () => {
+                                  await deleteMessage(r.message.id, currentMember.id);
+                                  setConfirmDelete(null);
+                                }}
+                                className="font-semibold text-red-700"
+                              >
+                                Delete
+                              </button>
+                              <button onClick={() => setConfirmDelete(null)}>Cancel</button>
+                            </>
+                          ) : (
+                            <button
+                              onClick={() => setConfirmDelete(r.message.id)}
+                              className="opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100"
+                              aria-label="Delete this message"
+                            >
+                              Delete
+                            </button>
+                          )
+                        ) : null}
                       </span>
-                    ) : null}
+                    </div>
                   </div>
                 </div>
-              </div>
-            );
-          })
+              );
+            })}
+          </>
         )}
       </div>
 
-      <form onSubmit={submit} className="mt-3 flex items-end gap-2">
-        <textarea
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            // Enter sends; Shift+Enter is a newline.
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              void submit(e as unknown as React.FormEvent);
+      {/* ------------------------------------------------------- composer */}
+      {recorder.recording ? (
+        <div className="border-line bg-surface mt-3 flex items-center gap-3 rounded-2xl border px-4 py-3">
+          <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-red-600" aria-hidden />
+          <span className="text-sm font-medium tabular-nums">
+            {formatDuration(recorder.seconds)}
+          </span>
+          <span className="text-faint text-xs">Recording…</span>
+          <button
+            onClick={recorder.cancel}
+            className="text-muted hover:text-ink ml-auto text-sm"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={finishRecording}
+            className="bg-ink grid h-10 w-10 place-items-center rounded-full text-white"
+            aria-label="Send voice note"
+          >
+            ↑
+          </button>
+        </div>
+      ) : (
+        <form onSubmit={submitText} className="mt-3 flex items-end gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            onChange={onFilePicked}
+            className="hidden"
+            aria-hidden
+            tabIndex={-1}
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={!canSend}
+            className="border-line hover:bg-sunk grid h-11 w-11 shrink-0 place-items-center rounded-full border text-lg disabled:opacity-40"
+            aria-label="Attach a file or photo"
+            title="Attach a file or photo"
+          >
+            📎
+          </button>
+
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              // Enter sends; Shift+Enter is a newline.
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                void submitText();
+              }
+            }}
+            rows={1}
+            maxLength={2000}
+            placeholder={
+              busy ?? (currentMember ? `Message as ${currentMember.name}…` : "Pick a profile first")
             }
-          }}
-          rows={1}
-          maxLength={2000}
-          placeholder={currentMember ? `Message as ${currentMember.name}…` : "Pick a profile first"}
-          disabled={!currentMember}
-          className="border-line bg-surface text-ink placeholder:text-faint focus:border-ink max-h-32 min-h-[2.75rem] flex-1 resize-none rounded-2xl border px-4 py-3 text-sm focus:outline-none"
-        />
-        <button
-          type="submit"
-          disabled={!draft.trim() || sending || !currentMember}
-          className="bg-ink grid h-11 w-11 shrink-0 place-items-center rounded-full text-white transition-opacity disabled:opacity-35"
-          aria-label="Send message"
-        >
-          ↑
-        </button>
-      </form>
+            disabled={!canSend}
+            className="border-line bg-surface text-ink placeholder:text-faint focus:border-ink max-h-32 min-h-[2.75rem] flex-1 resize-none rounded-2xl border px-4 py-3 text-sm focus:outline-none disabled:opacity-60"
+          />
+
+          {draft.trim() ? (
+            <button
+              type="submit"
+              disabled={!canSend}
+              className="bg-ink grid h-11 w-11 shrink-0 place-items-center rounded-full text-white disabled:opacity-35"
+              aria-label="Send message"
+            >
+              ↑
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={recorder.start}
+              disabled={!canSend || !recorder.supported}
+              title={recorder.supported ? "Record a voice note" : "Recording isn't supported here"}
+              className="border-line hover:bg-sunk grid h-11 w-11 shrink-0 place-items-center rounded-full border text-lg disabled:opacity-40"
+              aria-label="Record a voice note"
+            >
+              🎤
+            </button>
+          )}
+        </form>
+      )}
     </div>
   );
 }
