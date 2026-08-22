@@ -1,0 +1,31 @@
+name: family_tracker
+description: Mobile-only real-time family location tracking app for iOS and Android.
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.8.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  battery_plus: ^7.1.1
+  cloud_firestore: ^6.8.0
+  crypto: ^3.0.6
+  firebase_auth: ^6.5.7
+  firebase_core: ^4.13.0
+  flutter_secure_storage: ^11.0.0
+  geolocator: ^14.0.3
+  google_maps_flutter: ^2.18.0
+  in_app_purchase: ^3.3.0
+  pinput: ^6.0.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+
+flutter:
+  uses-material-design: true
+
