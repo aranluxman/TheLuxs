@@ -1,0 +1,40 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isFamilyMember(familyId) {
+      return signedIn() && exists(
+        /databases/$(database)/documents/families/$(familyId)/members/$(request.auth.uid)
+      );
+    }
+
+    match /families/{familyId}/members/{memberId} {
+      allow read: if isFamilyMember(familyId);
+      allow create, update: if signedIn() && request.auth.uid == memberId;
+      allow delete: if false;
+    }
+
+    match /family_locations/{memberId} {
+      allow read: if isFamilyMember(resource.data.familyId);
+      allow create, update: if signedIn()
+        && request.auth.uid == memberId
+        && isFamilyMember(request.resource.data.familyId);
+      allow delete: if signedIn() && request.auth.uid == memberId;
+
+      match /route_history/{pointId} {
+        allow read: if isFamilyMember(
+          get(/databases/$(database)/documents/family_locations/$(memberId)).data.familyId
+        );
+        allow create: if signedIn()
+          && request.auth.uid == memberId
+          && isFamilyMember(request.resource.data.familyId);
+        allow update, delete: if false;
+      }
+    }
+  }
+}
+

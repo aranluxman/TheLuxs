@@ -1,0 +1,8 @@
+android: launcher_icon
+ios: true
+image_path: assets/icon/family_tracker_icon.png
+adaptive_icon_background: "#142C28"
+adaptive_icon_foreground: assets/icon/family_tracker_icon_foreground.png
+min_sdk_android: 24
+remove_alpha_ios: true
+
