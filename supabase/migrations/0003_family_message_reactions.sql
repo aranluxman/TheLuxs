@@ -1,8 +1,12 @@
 -- ============================================================================
---  Family Dashboard, round 3
---    • message reactions (👍 ❤️ 😂) on the group chat
---    • chores removed entirely — tables, rotation engine and enum
---    • the indexes and constraints the first two rounds left out
+--  Family Dashboard, round 3 — message reactions (👍 ❤️ 😂) on the group chat,
+--  plus the indexes the first two rounds left out.
+--
+--  Nothing here drops anything. Removing the chores feature is round 4, kept
+--  separate on purpose: bundling a destructive drop with the table the chat
+--  needs is what left this migration unrun, and the live site throwing
+--  "Could not find the table 'public.family_message_reactions'".
+--
 --  Idempotent: safe to re-run.
 -- ============================================================================
 
@@ -23,6 +27,9 @@ create table if not exists public.family_message_reactions (
   primary key (message_id, member_id, emoji)
 );
 
+-- ❤️ is U+2764 U+FE0F — the variation selector is part of the value the client
+-- sends (`REACTION_EMOJI` in src/lib/types.ts). Dropping it here would make
+-- every heart fail this check.
 do $$ begin
   alter table public.family_message_reactions
     add constraint family_message_reactions_emoji_check
@@ -63,30 +70,6 @@ create index if not exists family_calendar_feeds_active_idx
   where is_active;
 
 -- ---------------------------------------------------------------------------
--- Chores: removed.
---
--- Dropped in dependency order. `family_chores` references the templates, and
--- both reference the recurrence enum, so the enum goes last. Nothing outside
--- the chores feature ever used any of it.
--- ---------------------------------------------------------------------------
-drop function if exists public.family_regenerate_future_chores(date, integer);
-drop function if exists public.family_generate_chores(date, integer);
-
--- Drop from the realtime publication first — dropping a published table while
--- it is still a member leaves the publication in an awkward state on older
--- Postgres versions.
-do $$
-begin
-  alter publication supabase_realtime drop table public.family_chores;
-exception when undefined_object or undefined_table then null; end $$;
-
-drop table if exists public.family_chore_exclusions;
-drop table if exists public.family_chores;
-drop table if exists public.family_chore_templates;
-
-drop type if exists public.family_recurrence;
-
--- ---------------------------------------------------------------------------
 -- RLS + realtime for reactions.
 --
 -- Same posture as every other family_* table: this dashboard has no login, so
@@ -104,6 +87,8 @@ create policy family_message_reactions_family_access
 
 -- FULL replica identity so a DELETE payload carries the removed row — that is
 -- what lets another device un-render a reaction it did not toggle itself.
+-- Without it `payload.old` arrives as the primary key only, and `useReactions`
+-- drops the event for want of an emoji.
 alter table public.family_message_reactions replica identity full;
 
 do $$

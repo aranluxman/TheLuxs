@@ -172,10 +172,14 @@ Then run, in order:
 
 - `supabase/migrations/0002_media_quotes_ical.sql` — profile photos, chat
   attachments, quotes and calendar feeds.
-- `supabase/migrations/0003_reactions_and_chores_removal.sql` — message
-  reactions, the missing indexes, and the removal of the chores feature.
+- `supabase/migrations/0003_family_message_reactions.sql` — message reactions
+  and the missing indexes. **The chat needs this one**; without it every
+  reaction fails with *Could not find the table
+  'public.family_message_reactions' in the schema cache*.
+- `supabase/migrations/0004_remove_chores.sql` — removes the retired chores
+  feature. Optional and destructive; see the note below.
 
-All three are idempotent — safe to re-run. Together they leave you with:
+All four are idempotent — safe to re-run. `0001`–`0003` leave you with:
 
 - `family_members`, `family_events`, `family_event_rsvps`,
   `family_calendar_entries`, `family_messages`, `family_message_reactions`,
@@ -185,12 +189,13 @@ All three are idempotent — safe to re-run. Together they leave you with:
 - the private `family-media` storage bucket and its policy
 - 28 seeded quotes
 
-> **Upgrading an existing install.** `0003` **drops** `family_chores`,
+> **Upgrading an existing install.** `0004` **drops** `family_chores`,
 > `family_chore_templates`, `family_chore_exclusions`, the
 > `family_generate_chores()` / `family_regenerate_future_chores()` /
 > `family_set_chore_done()` functions and the `family_recurrence` enum. That
 > deletes your chore history for good. Take a backup first if you want to keep
-> the record of who did what.
+> the record of who did what — nothing in the app reads those tables any more,
+> so leaving `0004` unrun costs you only the disk they sit on.
 
 > **Table naming.** Every object is prefixed `family_` because this Supabase
 > project is shared with other apps that follow the same convention
