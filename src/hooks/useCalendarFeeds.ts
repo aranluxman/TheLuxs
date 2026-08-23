@@ -4,6 +4,17 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
 import type { CalendarFeed } from "@/lib/types";
 
+/**
+ * Every column the browser is allowed to read. `url` is missing on purpose —
+ * see `CalendarFeed.has_url`. A `select("*")` here would now fail outright
+ * with "permission denied for column url", which is the intended behaviour.
+ */
+// One unbroken literal: supabase-js parses this string at the type level to
+// infer the row shape, and a concatenated expression widens to `string`, which
+// it cannot read — the query then types as GenericStringError[].
+const FEED_COLUMNS =
+  "id, member_id, name, is_active, has_url, last_synced_at, last_error, last_event_count, created_at";
+
 interface SyncResult {
   feed_id: string;
   count: number;
@@ -25,7 +36,7 @@ export function useCalendarFeeds(ready = true) {
     if (!isSupabaseConfigured) return;
     const { data, error: err } = await getSupabase()
       .from("family_calendar_feeds")
-      .select("*")
+      .select(FEED_COLUMNS)
       .order("created_at");
 
     if (err) setError(err.message);
@@ -72,10 +83,12 @@ export function useCalendarFeeds(ready = true) {
 
   const addFeed = useCallback(
     async (memberId: string | null, name: string, url: string) => {
+      // Writing the URL is still permitted; only reading it back is not, so
+      // the returning clause names the id rather than the whole row.
       const { data, error: err } = await getSupabase()
         .from("family_calendar_feeds")
         .insert({ member_id: memberId, name: name.trim(), url: url.trim() })
-        .select()
+        .select("id")
         .single();
 
       if (err) {
@@ -83,7 +96,7 @@ export function useCalendarFeeds(ready = true) {
         return false;
       }
       // Pull it in straight away so the calendar is populated immediately.
-      const results = await invoke({ feed_id: (data as CalendarFeed).id });
+      const results = await invoke({ feed_id: (data as { id: string }).id });
       return results.every((r) => !r.error);
     },
     [invoke],
@@ -175,7 +188,9 @@ export function useCalendarAutoSync(onSynced: () => void, enabled = true) {
       .from("family_calendar_feeds")
       .select("id")
       .eq("is_active", true)
-      .neq("url", "")
+      // Filtering on `url` would need SELECT on that column, which the browser
+      // no longer has; the generated boolean carries the same meaning.
+      .eq("has_url", true)
       .limit(1);
     if (err || !data?.length) return;
 
