@@ -1,4 +1,3 @@
-export type Recurrence = "daily" | "weekly";
 export type RsvpStatus = "going" | "maybe" | "not_going";
 
 export interface FamilyMember {
@@ -15,33 +14,6 @@ export interface FamilyMember {
 /** A member plus the short-lived signed URL for their photo. */
 export interface MemberWithPhoto extends FamilyMember {
   avatar_url: string | null;
-}
-
-export interface ChoreTemplate {
-  id: string;
-  title: string;
-  description: string | null;
-  recurrence_type: Recurrence;
-  rotation_offset: number;
-  is_active: boolean;
-  sort_order: number;
-  created_at: string;
-}
-
-export interface Chore {
-  id: string;
-  template_id: string | null;
-  title: string;
-  description: string | null;
-  recurrence_type: Recurrence;
-  assigned_member_id: string | null;
-  is_completed: boolean;
-  completed_at: string | null;
-  completed_by: string | null;
-  /** `YYYY-MM-DD` */
-  due_date: string;
-  period_key: string;
-  created_at: string;
 }
 
 export interface FamilyEvent {
@@ -93,9 +65,26 @@ export interface Message {
   deleted_by: string | null;
 }
 
-export interface ChoreExclusion {
-  template_id: string;
+/**
+ * The closed reaction palette. Widening this array is not enough on its own —
+ * `family_message_reactions` has a matching check constraint, so the migration
+ * has to agree before a new emoji will insert.
+ */
+export const REACTION_EMOJI = ["👍", "❤️", "😂"] as const;
+export type ReactionEmoji = (typeof REACTION_EMOJI)[number];
+
+export interface MessageReaction {
+  message_id: string;
   member_id: string;
+  emoji: ReactionEmoji;
+  created_at: string;
+}
+
+/** One emoji's tally on one message, resolved for rendering. */
+export interface ReactionSummary {
+  emoji: ReactionEmoji;
+  memberIds: string[];
+  mine: boolean;
 }
 
 export interface Quote {
@@ -116,8 +105,14 @@ export interface CalendarFeed {
   id: string;
   member_id: string | null;
   name: string;
-  /** Empty string means a one-off pasted import rather than a live URL. */
-  url: string;
+  /**
+   * Whether this feed has a live URL, as opposed to a one-off pasted import.
+   *
+   * The URL itself is deliberately absent: it is a *secret* calendar address,
+   * and migration 0004 revokes SELECT on that column from the browser's role.
+   * A generated column answers the only question the UI ever asked of it.
+   */
+  has_url: boolean;
   is_active: boolean;
   last_synced_at: string | null;
   last_error: string | null;
@@ -126,7 +121,7 @@ export interface CalendarFeed {
 }
 
 /** Anything that can land on the aggregated calendar. */
-export type AgendaKind = "event" | "entry" | "chore";
+export type AgendaKind = "event" | "entry";
 
 export interface AgendaItem {
   id: string;
@@ -135,11 +130,10 @@ export interface AgendaItem {
   subtitle?: string | null;
   /** Local `YYYY-MM-DD` the item belongs to. */
   day: string;
-  /** Null for all-day items such as chore deadlines. */
+  /** Null for all-day items. */
   start: Date | null;
   end: Date | null;
   memberIds: string[];
-  done?: boolean;
   allDay?: boolean;
   /** Imported from a calendar feed — deleting it here would just resync back. */
   readOnly?: boolean;

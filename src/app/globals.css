@@ -1,24 +1,95 @@
 @import "tailwindcss";
 
+/*
+ * Every colour in the app goes through one of these tokens. That is what makes
+ * a theme switch a variable swap rather than a sweep through every component:
+ * `bg-surface` resolves to `var(--color-surface)`, so redefining the variable
+ * under `[data-theme="dark"]` re-skins the whole tree.
+ *
+ * Two tokens exist purely so that dark mode does not need per-component
+ * overrides:
+ *   --color-on-ink    text that sits on an ink-filled surface (buttons, my own
+ *                     chat bubbles). White on light, near-black on dark.
+ *   --color-danger-*  destructive affordances, which otherwise reach for
+ *                     Tailwind's red-50/red-800 pair and glare in the dark.
+ */
 @theme {
   /* Warm paper palette — this thing lives on a kitchen tablet, not a terminal. */
   --color-canvas: #f6f4f0;
   --color-surface: #ffffff;
   --color-sunk: #efece6;
   --color-ink: #1c1917;
+  --color-on-ink: #ffffff;
   --color-muted: #78716c;
   --color-faint: #a8a29e;
   --color-line: #e5e0d8;
   --color-accent: #b45309;
+  --color-danger: #b91c1c;
+  --color-danger-soft: #fef2f2;
 
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+/*
+ * `dark:` utilities, driven by the same attribute as the tokens below, so a
+ * component can opt into a dark-only tweak without a media query.
+ */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/*
+ * Dark palette. Warm-neutral rather than blue-grey, so it reads as the same
+ * product with the lights off. Kept as one block and applied from two
+ * selectors: the explicit choice, and the system default when the user has
+ * not chosen. `:root:not([data-theme="light"])` is what stops the media query
+ * from overriding someone who deliberately picked light.
+ */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-canvas: #12100e;
+    --color-surface: #1c1a17;
+    --color-sunk: #262320;
+    --color-ink: #f5f2ec;
+    --color-on-ink: #12100e;
+    --color-muted: #a8a29e;
+    --color-faint: #78716c;
+    --color-line: #332f2a;
+    --color-accent: #f0b429;
+    --color-danger: #f87171;
+    --color-danger-soft: #2a1717;
+  }
+}
+
+:root[data-theme="dark"] {
+  --color-canvas: #12100e;
+  --color-surface: #1c1a17;
+  --color-sunk: #262320;
+  --color-ink: #f5f2ec;
+  --color-on-ink: #12100e;
+  --color-muted: #a8a29e;
+  --color-faint: #78716c;
+  --color-line: #332f2a;
+  --color-accent: #f0b429;
+  --color-danger: #f87171;
+  --color-danger-soft: #2a1717;
 }
 
 html {
   background: var(--color-canvas);
   color: var(--color-ink);
   -webkit-tap-highlight-color: transparent;
+  /* Native widgets — scrollbars, date pickers, form controls — follow along. */
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
 }
 
 body {

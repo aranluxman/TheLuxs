@@ -20,8 +20,8 @@ const blank = (i: number): Draft => ({
 
 /**
  * First run. Rather than shipping five fake people in the migration, the
- * family names itself here — then the rotation engine has an ordering to work
- * with and can generate the first fortnight of chores.
+ * family names itself here. `sort_order` follows the order they are entered,
+ * which is the order they appear in every picker and filter afterwards.
  */
 export function SetupScreen() {
   const { reloadMembers, setCurrentMemberId } = useFamily();
@@ -36,7 +36,7 @@ export function SetupScreen() {
 
   async function save() {
     if (named.length < 2) {
-      setError("Add at least two people so chores have someone to rotate between.");
+      setError("Add at least two people so there is a family to share.");
       return;
     }
     setSaving(true);
@@ -58,10 +58,6 @@ export function SetupScreen() {
       return;
     }
 
-    // Now that there is a roster, lay down the first four weeks of chores.
-    const { error: rpcError } = await supabase.rpc("family_generate_chores", { p_days: 28 });
-    if (rpcError) setError(rpcError.message);
-
     await reloadMembers();
     setCurrentMemberId(null); // straight into "who are you?"
     setSaving(false);
@@ -71,8 +67,8 @@ export function SetupScreen() {
     <main className="mx-auto w-full max-w-2xl px-5 py-12">
       <h1 className="text-2xl font-semibold">Set up your family</h1>
       <p className="text-muted mt-2 text-sm">
-        Add everyone in the house. Chores rotate through this list in order, so whoever
-        is first here starts the roster.
+        Add everyone in the house. Each person gets their own colour, which tags
+        their events across the calendar and chat.
       </p>
 
       <div className="mt-8 space-y-3">

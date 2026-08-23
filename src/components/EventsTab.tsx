@@ -84,7 +84,7 @@ function EventCard({
 
         <button
           onClick={onDelete}
-          className="text-faint h-8 w-8 shrink-0 rounded-full text-lg hover:bg-red-50 hover:text-red-700"
+          className="text-faint hover:bg-danger-soft hover:text-danger h-8 w-8 shrink-0 rounded-full text-lg"
           aria-label={`Delete ${event.title}`}
           title="Delete event"
         >
@@ -135,7 +135,7 @@ function EventCard({
                 aria-pressed={mine === s}
                 className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
                   mine === s
-                    ? "bg-ink text-white"
+                    ? "bg-ink text-on-ink"
                     : "border-line bg-surface text-muted hover:bg-sunk border"
                 }`}
               >

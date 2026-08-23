@@ -7,6 +7,8 @@ import type { MemberWithPhoto } from "@/lib/types";
 /* ---------------------------------------------------------------- Avatar */
 
 const AVATAR_SIZES = {
+  /** Reaction pills — small enough to stack three abreast inside a chip. */
+  xs: "h-4 w-4 text-[8px]",
   sm: "h-7 w-7 text-sm",
   md: "h-10 w-10 text-lg",
   lg: "h-14 w-14 text-2xl",
@@ -90,9 +92,9 @@ export function Button({ variant = "primary", className = "", ...rest }: ButtonP
     "transition-colors disabled:cursor-not-allowed disabled:opacity-45 " +
     "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink";
   const variants = {
-    primary: "bg-ink text-white hover:bg-ink/85",
+    primary: "bg-ink text-on-ink hover:opacity-85",
     ghost: "border border-line bg-surface text-ink hover:bg-sunk",
-    danger: "text-red-700 hover:bg-red-50",
+    danger: "text-danger hover:bg-danger-soft",
   };
   return <button className={`${base} ${variants[variant]} ${className}`} {...rest} />;
 }
@@ -232,7 +234,7 @@ export function Modal({
 export function ErrorNote({ message }: { message: string | null }) {
   if (!message) return null;
   return (
-    <p className="mb-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-800" role="alert">
+    <p className="bg-danger-soft text-danger mb-3 rounded-xl px-3 py-2 text-xs" role="alert">
       {message}
     </p>
   );

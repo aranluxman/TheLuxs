@@ -69,10 +69,10 @@ export function CalendarFeeds({
                             "MMM d, h:mm a",
                           )}`
                         : "Not synced yet"}
-                    {f.url ? "" : " · one-off import"}
+                    {f.has_url ? "" : " · one-off import"}
                   </p>
                 </div>
-                {f.url ? (
+                {f.has_url ? (
                   <button
                     onClick={async () => {
                       await syncFeed(f.id);
@@ -89,7 +89,7 @@ export function CalendarFeeds({
                     await removeFeed(f.id);
                     onSynced();
                   }}
-                  className="text-faint h-7 w-7 shrink-0 rounded-full text-lg hover:bg-red-50 hover:text-red-700"
+                  className="text-faint hover:bg-danger-soft hover:text-danger h-7 w-7 shrink-0 rounded-full text-lg"
                   aria-label={`Remove ${f.name}`}
                 >
                   ×
@@ -177,7 +177,7 @@ export function CalendarFeeds({
               await syncAll();
               onSynced();
             }}
-            disabled={syncing || feeds.every((f) => !f.url)}
+            disabled={syncing || feeds.every((f) => !f.has_url)}
             className="text-muted hover:text-ink text-xs disabled:opacity-40"
           >
             Sync everything now
