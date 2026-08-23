@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
 import type { CalendarFeed } from "@/lib/types";
 
@@ -128,4 +128,90 @@ export function useCalendarFeeds(ready = true) {
     removeFeed,
     reload: load,
   };
+}
+
+/** How often a left-open dashboard re-pulls every subscribed feed. */
+const AUTO_SYNC_INTERVAL_MS = 30 * 60 * 1000;
+
+/**
+ * A tab that has been in the background all morning should not show a stale
+ * calendar the moment it is looked at again, but it also should not re-fetch
+ * every feed on every glance.
+ */
+const STALE_AFTER_MS = 15 * 60 * 1000;
+
+/**
+ * Keeps subscribed iCal feeds fresh without anyone pressing Sync.
+ *
+ * Three triggers: once on mount, on a long interval, and when the tab is
+ * brought back to the foreground after going stale. The Edge Function replaces
+ * each feed's slice of the window wholesale, so a redundant run is harmless —
+ * which is what makes it safe for several devices in the house to do this
+ * independently.
+ *
+ * `onSynced` is called only when a run actually happened, so the caller can
+ * reload entries without a render loop.
+ */
+export function useCalendarAutoSync(onSynced: () => void, enabled = true) {
+  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
+
+  // Held in refs so the effect below can depend on neither, and therefore
+  // never tears down and re-arms its timer mid-session.
+  const onSyncedRef = useRef(onSynced);
+  const runningRef = useRef(false);
+  const lastRunRef = useRef(0);
+
+  // Written in an effect rather than during render: a ref mutated mid-render
+  // is not safe under a concurrent render that React later discards.
+  useEffect(() => {
+    onSyncedRef.current = onSynced;
+  }, [onSynced]);
+
+  const run = useCallback(async () => {
+    if (!isSupabaseConfigured || runningRef.current) return;
+
+    // Only worth invoking the function if something is actually subscribed.
+    const { data, error: err } = await getSupabase()
+      .from("family_calendar_feeds")
+      .select("id")
+      .eq("is_active", true)
+      .neq("url", "")
+      .limit(1);
+    if (err || !data?.length) return;
+
+    runningRef.current = true;
+    try {
+      const { error: invokeError } = await getSupabase().functions.invoke(
+        "family-sync-ical",
+        { body: { sync_all: true } },
+      );
+      lastRunRef.current = Date.now();
+      setLastSyncedAt(lastRunRef.current);
+      // A failed sync still leaves the previously imported entries in place,
+      // so the calendar degrades to "slightly stale" rather than to empty.
+      if (!invokeError) onSyncedRef.current();
+    } finally {
+      runningRef.current = false;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!enabled) return;
+    void run();
+    const id = setInterval(() => void run(), AUTO_SYNC_INTERVAL_MS);
+
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      if (Date.now() - lastRunRef.current < STALE_AFTER_MS) return;
+      void run();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [enabled, run]);
+
+  return { lastSyncedAt, syncNow: run };
 }

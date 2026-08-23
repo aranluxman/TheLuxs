@@ -89,7 +89,7 @@ export function CalendarFeeds({
                     await removeFeed(f.id);
                     onSynced();
                   }}
-                  className="text-faint h-7 w-7 shrink-0 rounded-full text-lg hover:bg-red-50 hover:text-red-700"
+                  className="text-faint hover:bg-danger-soft hover:text-danger h-7 w-7 shrink-0 rounded-full text-lg"
                   aria-label={`Remove ${f.name}`}
                 >
                   ×

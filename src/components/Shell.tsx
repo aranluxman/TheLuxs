@@ -2,17 +2,16 @@
 
 import { useState } from "react";
 import { useFamily } from "./FamilyProvider";
-import { ChoresTab } from "./ChoresTab";
 import { EventsTab } from "./EventsTab";
 import { CalendarTab } from "./CalendarTab";
 import { ChatTab } from "./ChatTab";
 import { ProfileSheet } from "./ProfileSheet";
+import { ThemeToggle } from "./ThemeToggle";
 import { Avatar } from "./ui";
 
 const TABS = [
-  { id: "chores", label: "Chores", icon: "🧽" },
-  { id: "events", label: "Events", icon: "🎟️" },
   { id: "calendar", label: "Calendar", icon: "🗓️" },
+  { id: "events", label: "Events", icon: "🎟️" },
   { id: "chat", label: "Chat", icon: "💬" },
 ] as const;
 
@@ -20,7 +19,8 @@ type TabId = (typeof TABS)[number]["id"];
 
 export function Shell() {
   const { currentMember, setCurrentMemberId } = useFamily();
-  const [tab, setTab] = useState<TabId>("chores");
+  // Chores used to open the app. The calendar is the thing everyone checks now.
+  const [tab, setTab] = useState<TabId>("calendar");
   const [profilesOpen, setProfilesOpen] = useState(false);
 
   return (
@@ -37,7 +37,7 @@ export function Shell() {
                 onClick={() => setTab(t.id)}
                 aria-current={tab === t.id ? "page" : undefined}
                 className={`rounded-xl px-3.5 py-1.5 text-sm font-medium transition-colors ${
-                  tab === t.id ? "bg-ink text-white" : "text-muted hover:bg-sunk"
+                  tab === t.id ? "bg-ink text-on-ink" : "text-muted hover:bg-sunk"
                 }`}
               >
                 {t.label}
@@ -46,6 +46,7 @@ export function Shell() {
           </nav>
 
           <div className="ml-auto flex items-center gap-1 sm:ml-0">
+            <ThemeToggle />
             <button
               onClick={() => setProfilesOpen(true)}
               className="hover:bg-sunk flex items-center gap-2 rounded-full py-1 pr-3 pl-1"
@@ -66,14 +67,13 @@ export function Shell() {
       </header>
 
       <main className="mx-auto w-full max-w-5xl flex-1 px-4 pt-5 pb-24 sm:pb-8">
-        {tab === "chores" ? <ChoresTab /> : null}
-        {tab === "events" ? <EventsTab /> : null}
         {tab === "calendar" ? <CalendarTab /> : null}
+        {tab === "events" ? <EventsTab /> : null}
         {tab === "chat" ? <ChatTab /> : null}
       </main>
 
       <nav
-        className="border-line bg-surface/95 fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden"
+        className="border-line bg-surface/95 fixed inset-x-0 bottom-0 z-30 grid grid-cols-3 border-t pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden"
         aria-label="Sections"
       >
         {TABS.map((t) => (
