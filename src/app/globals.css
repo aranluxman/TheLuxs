@@ -88,6 +88,22 @@ html {
   color-scheme: light;
 }
 
+/*
+ * Nothing may scroll the page sideways. On a phone a single over-wide element
+ * does not just hide itself: it makes the whole document pannable, and the
+ * fixed bottom nav then sits off to one side where the last tab cannot be
+ * reached without dragging the page back.
+ *
+ * `clip` rather than `hidden` on purpose. `hidden` turns the element into a
+ * scroll container, which would become the nearest scrollport for the
+ * calendar's `sticky` day headings and stop them sticking. `clip` truncates
+ * without creating one, so sticky positioning is unaffected.
+ */
+html,
+body {
+  overflow-x: clip;
+}
+
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;

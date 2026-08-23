@@ -375,11 +375,13 @@ export function CalendarTab() {
       </div>
 
       {/* -------------------------------------------------------- person tabs */}
-      <div
-        className="scroll-area -mx-1 flex gap-2 overflow-x-auto px-1 pb-1"
-        role="tablist"
-        aria-label="Whose schedule"
-      >
+      {/* Wraps rather than scrolling sideways. A horizontal scroller hid
+          members past the right edge on a phone — with five people the last
+          chip sat ~430px off-screen — and it was also making the whole
+          document horizontally scrollable, which dragged the fixed bottom nav
+          out of reach. Two short rows of chips cost a few pixels of height and
+          keep every member visible and tappable. */}
+      <div className="flex flex-wrap gap-2" role="tablist" aria-label="Whose schedule">
         <button
           role="tab"
           aria-selected={person === null}
