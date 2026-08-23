@@ -52,11 +52,9 @@ class TrackerMap extends StatefulWidget {
   const TrackerMap({
     super.key,
     required this.familyId,
-    this.onOpenPaywall,
   });
 
   final String familyId;
-  final VoidCallback? onOpenPaywall;
 
   @override
   State<TrackerMap> createState() => _TrackerMapState();
@@ -181,7 +179,6 @@ class _TrackerMapState extends State<TrackerMap> {
       backgroundColor: Colors.transparent,
       builder: (_) => MemberProfileSheet(
         member: member,
-        onOpenPaywall: widget.onOpenPaywall,
       ),
     );
   }
@@ -263,11 +260,6 @@ class _TrackerMapState extends State<TrackerMap> {
           style: TextStyle(fontWeight: FontWeight.w800),
         ),
         actions: [
-          IconButton(
-            tooltip: 'Family Pro',
-            onPressed: widget.onOpenPaywall,
-            icon: const Icon(Icons.workspace_premium_outlined),
-          ),
           IconButton(
             tooltip: 'Settings',
             onPressed: _openSettings,
@@ -465,11 +457,9 @@ class MemberProfileSheet extends StatelessWidget {
   const MemberProfileSheet({
     super.key,
     required this.member,
-    this.onOpenPaywall,
   });
 
   final FamilyLocation member;
-  final VoidCallback? onOpenPaywall;
 
   String get _lastSeen {
     final updatedAt = member.updatedAt;
@@ -529,12 +519,6 @@ class MemberProfileSheet extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: 16),
-              OutlinedButton.icon(
-                onPressed: onOpenPaywall,
-                icon: const Icon(Icons.route_rounded),
-                label: const Text('View 30-day route history'),
-              ),
             ],
           ),
         ),
@@ -574,4 +558,3 @@ class _StatCard extends StatelessWidget {
     );
   }
 }
-
