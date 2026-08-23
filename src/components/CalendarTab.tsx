@@ -15,7 +15,7 @@ import {
   parseISO,
   toLocalInputValue,
 } from "@/lib/dates";
-import { CALENDAR_CATEGORIES, tint } from "@/lib/palette";
+import { CALENDAR_CATEGORIES, categoryStyle, tint } from "@/lib/palette";
 import type { AgendaItem, CalendarEntry, EventRsvp, FamilyEvent } from "@/lib/types";
 import { CalendarFeeds } from "./CalendarFeeds";
 import { useFamily } from "./FamilyProvider";
@@ -33,9 +33,11 @@ import {
 
 /** How far ahead each range option looks. */
 const RANGES = [
-  { id: "2w", label: "2 weeks", days: 14 },
-  { id: "4w", label: "4 weeks", days: 28 },
-  { id: "3m", label: "3 months", days: 92 },
+  // `short` is what a 390px phone shows: the full labels wrapped onto two
+  // lines each, turning the segmented control into a three-storey block.
+  { id: "2w", label: "2 weeks", short: "2w", days: 14 },
+  { id: "4w", label: "4 weeks", short: "4w", days: 28 },
+  { id: "3m", label: "3 months", short: "3m", days: 92 },
 ] as const;
 
 type RangeId = (typeof RANGES)[number]["id"];
@@ -117,6 +119,17 @@ function belongsTo(item: AgendaItem, person: PersonFilter): boolean {
 
 const KIND_ICON = { event: "🎟️", entry: "•" } as const;
 
+/**
+ * An entry's icon comes from its category; an event keeps the ticket glyph,
+ * because "event" is a kind rather than a category and reads as its own thing.
+ */
+function rowGlyph(item: AgendaItem): { icon: string; label: string; hue: string } {
+  if (item.kind === "event") {
+    return { icon: KIND_ICON.event, label: "Event", hue: "#b45309" };
+  }
+  return categoryStyle(item.subtitle);
+}
+
 function AgendaRow({
   item,
   onDelete,
@@ -127,6 +140,7 @@ function AgendaRow({
   const { byId } = useFamily();
   const owners = item.memberIds.map((id) => byId[id]).filter(Boolean);
   const color = owners[0]?.color ?? "#a8a29e";
+  const glyph = rowGlyph(item);
 
   return (
     <li className="group hover:bg-sunk/50 flex items-start gap-3 rounded-xl px-2 py-3 transition-[background-color,transform] hover:translate-x-px">
@@ -146,13 +160,21 @@ function AgendaRow({
       </span>
 
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium">
-          <span className="mr-1.5 text-xs" aria-hidden>
-            {KIND_ICON[item.kind]}
+        <p className="flex items-center gap-1.5 text-sm font-medium">
+          <span
+            className="grid h-5 w-5 shrink-0 place-items-center rounded-md text-[11px]"
+            style={{ backgroundColor: tint(glyph.hue, 0.16) }}
+            title={glyph.label}
+            aria-hidden
+          >
+            {glyph.icon}
           </span>
-          {item.title}
+          <span className="min-w-0 truncate">{item.title}</span>
         </p>
         <p className="text-faint mt-0.5 text-xs">
+          {/* Screen readers get the category as words; sighted users get the
+              glyph above, so it is not repeated as text twice. */}
+          <span className="sr-only">{glyph.label}. </span>
           {item.end ? `until ${formatTime(item.end)}` : null}
           {item.end && item.subtitle ? " · " : null}
           {item.subtitle}
@@ -308,11 +330,13 @@ export function CalendarTab() {
                 key={r.id}
                 onClick={() => setRange(r.id)}
                 aria-pressed={range === r.id}
-                className={`rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                className={`rounded-lg px-2.5 py-1.5 text-xs font-medium whitespace-nowrap transition-colors ${
                   range === r.id ? "bg-surface text-ink shadow-sm" : "text-muted"
                 }`}
+                aria-label={`Show the next ${r.label}`}
               >
-                {r.label}
+                <span className="sm:hidden">{r.short}</span>
+                <span className="hidden sm:inline">{r.label}</span>
               </button>
             ))}
           </div>

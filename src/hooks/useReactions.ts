@@ -178,5 +178,19 @@ export function useReactions(ready = true) {
     [byMessage],
   );
 
-  return { ensureFor, toggle, summarise, error };
+  return {
+    ensureFor,
+    toggle,
+    summarise,
+    error,
+    /**
+     * Number of reaction rows held. Reactions arrive on their own fetch, after
+     * the messages have already painted and the thread has already scrolled to
+     * the bottom — every pill that lands afterwards grows the content and
+     * leaves the newest message clipped under the composer. The chat watches
+     * this to re-pin. It changes on exactly the events that change height
+     * (an insert or a delete), so it is not a busy signal.
+     */
+    count: Object.keys(rows).length,
+  };
 }
