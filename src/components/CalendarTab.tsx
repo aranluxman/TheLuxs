@@ -42,6 +42,14 @@ const RANGES = [
 
 type RangeId = (typeof RANGES)[number]["id"];
 
+/**
+ * Days of agenda shown before the Load more button, and how many each press
+ * adds. Counted in *days that have something on them* rather than calendar
+ * days: a run of empty days renders nothing, so paging by calendar date would
+ * hand back a button that reveals blank space.
+ */
+const DAYS_PER_PAGE = 3;
+
 /** `null` is the "Everyone" tab. */
 type PersonFilter = string | null;
 
@@ -211,6 +219,7 @@ export function CalendarTab() {
 
   const [person, setPerson] = useState<PersonFilter>(null);
   const [range, setRange] = useState<RangeId>("4w");
+  const [visibleDays, setVisibleDays] = useState(DAYS_PER_PAGE);
   const [open, setOpen] = useState(false);
   const [feedsOpen, setFeedsOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -280,6 +289,24 @@ export function CalendarTab() {
     return [...map.entries()];
   }, [visible]);
 
+  // A different person or range is a different question, so it is answered
+  // from the top rather than from however far the previous one was expanded.
+  // Done in the handlers rather than an effect: the reset belongs to the
+  // interaction, and deriving it from a render-phase comparison would be a
+  // roundabout way of saying the same thing.
+  function chooseRange(next: RangeId) {
+    setRange(next);
+    setVisibleDays(DAYS_PER_PAGE);
+  }
+
+  function choosePerson(next: PersonFilter) {
+    setPerson(next);
+    setVisibleDays(DAYS_PER_PAGE);
+  }
+
+  const shownDays = byDay.slice(0, visibleDays);
+  const hiddenDayCount = byDay.length - shownDays.length;
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!form.title.trim()) return;
@@ -328,7 +355,7 @@ export function CalendarTab() {
             {RANGES.map((r) => (
               <button
                 key={r.id}
-                onClick={() => setRange(r.id)}
+                onClick={() => chooseRange(r.id)}
                 aria-pressed={range === r.id}
                 className={`rounded-lg px-2.5 py-1.5 text-xs font-medium whitespace-nowrap transition-colors ${
                   range === r.id ? "bg-surface text-ink shadow-sm" : "text-muted"
@@ -356,7 +383,7 @@ export function CalendarTab() {
         <button
           role="tab"
           aria-selected={person === null}
-          onClick={() => setPerson(null)}
+          onClick={() => choosePerson(null)}
           className={`inline-flex shrink-0 items-center gap-2 rounded-full border px-3.5 py-2 text-sm font-medium transition-colors ${
             person === null
               ? "border-ink bg-ink text-on-ink"
@@ -375,7 +402,7 @@ export function CalendarTab() {
               key={m.id}
               role="tab"
               aria-selected={active}
-              onClick={() => setPerson(active ? null : m.id)}
+              onClick={() => choosePerson(active ? null : m.id)}
               className={`inline-flex shrink-0 items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
                 active ? "text-ink" : "border-line bg-surface text-muted hover:bg-sunk"
               }`}
@@ -412,7 +439,7 @@ export function CalendarTab() {
         </Card>
       ) : (
         <div className="space-y-4">
-          {byDay.map(([key, items]) => {
+          {shownDays.map(([key, items]) => {
             const date = parseDayKey(key);
             const today = isSameDay(date, new Date());
             return (
@@ -453,6 +480,23 @@ export function CalendarTab() {
               </section>
             );
           })}
+
+          {hiddenDayCount > 0 ? (
+            <button
+              onClick={() => setVisibleDays((n) => n + DAYS_PER_PAGE)}
+              className="border-line bg-surface text-ink hover:bg-sunk dashboard-card w-full rounded-2xl border py-3.5 text-sm font-semibold transition-colors"
+              // The two spans below sit flush in the accessibility tree
+              // ("Load more5 more days"), so the spoken name is set here.
+              aria-label={`Load more. ${hiddenDayCount} more ${
+                hiddenDayCount === 1 ? "day" : "days"
+              } with something scheduled.`}
+            >
+              Load more
+              <span className="text-muted ml-1.5 font-medium">
+                {hiddenDayCount} more {hiddenDayCount === 1 ? "day" : "days"}
+              </span>
+            </button>
+          ) : null}
         </div>
       )}
 
