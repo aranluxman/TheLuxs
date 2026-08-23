@@ -4,8 +4,7 @@ Mobile-only Flutter starter for iOS and Android. The main feature files are:
 
 - `lib/main.dart` — Firebase bootstrap, dark theme, mobile app shell.
 - `lib/tracker_map.dart` — Google Maps, Firestore live streams, location publishing, battery data, profile drawer.
-- `lib/pin_gate.dart` — 4-digit Pinput lock with incorrect-PIN shake state and Keychain/Keystore storage.
-- `lib/paywall.dart` — `$4.99/month` Family Pro purchase flow using `in_app_purchase`.
+- `lib/pin_gate.dart` — 4-digit Pinput lock, app lifecycle lock, inactivity timeout, cooldown, and Keychain/Keystore storage.
 - `firestore.rules` — family-scoped read/write rules for live locations and route history.
 
 ## Setup commands
@@ -54,17 +53,14 @@ Also add `import GoogleMaps`, set iOS deployment target to 14.0+, and add `NSLoc
 
 4. Create a family member document at `families/{familyId}/members/{authUid}` for every authorized user. The map reads from the top-level `family_locations` collection and expects each document to include `familyId`, `memberId`, `displayName`, `latitude`, `longitude`, `batteryLevel`, and `updatedAt`.
 
-## Store setup
+## Privacy lock behavior
 
-Create the same product ID in App Store Connect and Google Play Console:
-
-```text
-Product ID: family_pro_monthly
-Type: auto-renewable subscription / subscription
-Price: $4.99 USD per month
-```
-
-Use sandbox/TestFlight and Play internal testing before release. The sample unlocks the UI after the store reports `purchased` or `restored`; production should verify Apple/Google receipts on a trusted server before granting entitlements.
+- `AppSecurityGate` requires the household PIN before the map can be viewed.
+- The app locks again on `paused`, `detached`, or `resumed` lifecycle transitions.
+- Any pointer interaction resets the configurable inactivity timer, currently 60 seconds.
+- Tapping a family member or settings still opens a fresh PIN gate, so moving between private profiles cannot rely on a previous unlock.
+- The current anonymous-session data model does not contain per-member PIN identities, so this build intentionally uses one household PIN. See the TODO in `lib/pin_gate.dart` before introducing per-profile PIN verification.
+- PIN hashes are stored only through `flutter_secure_storage`; no `shared_preferences` dependency or plaintext PIN storage is used. A one-time migration handles the legacy secure-storage raw-PIN key if present.
 
 ## App icon assets
 
@@ -75,17 +71,14 @@ Add these high-resolution assets before running `dart run flutter_launcher_icons
 
 Keep important artwork inside the central 66% safe area so Android masks do not crop it. The full configuration is in `flutter_launcher_icons.yaml`.
 
-## Git commands for `theluxs` / `preview`
+## Git commands for `TheLuxs` / `preview`
 
-These commands assume the GitHub repository URL is `https://github.com/theluxs/theluxs.git`:
+From the repository root, use:
 
 ```powershell
-git init
-git branch -M preview
-git remote add origin https://github.com/theluxs/theluxs.git
-git add pubspec.yaml flutter_launcher_icons.yaml lib/main.dart lib/pin_gate.dart lib/paywall.dart lib/tracker_map.dart firestore.rules firebase.json README.md assets/icon/README.md
-git commit -m "Build mobile family location tracker"
-git push -u origin preview
+git add flutter_app/pubspec.yaml flutter_app/flutter_launcher_icons.yaml flutter_app/lib/main.dart flutter_app/lib/pin_gate.dart flutter_app/lib/tracker_map.dart flutter_app/firestore.rules flutter_app/firebase.json flutter_app/README.md flutter_app/assets/icon/README.md
+git commit -m "Harden family tracker privacy lock"
+git push origin preview
 ```
 
-If a remote already exists, use `git remote set-url origin https://github.com/theluxs/theluxs.git` instead of `git remote add origin ...`.
+If a remote is not configured yet, add `https://github.com/aranluxman/TheLuxs.git` as `origin` before pushing.

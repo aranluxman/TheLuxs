@@ -2,7 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 
-import 'paywall.dart';
+import 'pin_gate.dart';
 import 'tracker_map.dart';
 
 Future<void> main() async {
@@ -52,7 +52,7 @@ class FamilyTrackerApp extends StatelessWidget {
         ),
       ),
       home: bootstrapError == null
-          ? const HomePage()
+          ? const AppSecurityGate(child: HomePage())
           : SetupRequiredPage(error: bootstrapError!),
     );
   }
@@ -70,13 +70,6 @@ class HomePage extends StatelessWidget {
   Widget build(BuildContext context) {
     return TrackerMap(
       familyId: familyId,
-      onOpenPaywall: () {
-        Navigator.of(context).push(
-          MaterialPageRoute<void>(
-            builder: (_) => const PaywallScreen(),
-          ),
-        );
-      },
     );
   }
 }
