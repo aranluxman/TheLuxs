@@ -56,20 +56,29 @@ export function Shell() {
 
           <div className="ml-auto flex items-center gap-1 sm:ml-0">
             <ThemeToggle />
+            {/* At 390px the brand lockup, theme toggle, avatar, name and Switch
+                all competed for one row and pushed Switch against the edge.
+                Below `sm` the avatar alone identifies you — the name is one tap
+                away in the sheet it opens. */}
             <button
               onClick={() => setProfilesOpen(true)}
-              className="hover:bg-sunk flex min-h-11 items-center gap-2 rounded-full py-1 pr-3 pl-1 transition-colors"
+              className="hover:bg-sunk flex min-h-11 items-center gap-2 rounded-full py-1 pr-1 pl-1 transition-colors sm:pr-3"
               title="Edit profiles and photos"
+              aria-label={
+                currentMember ? `Signed in as ${currentMember.name}. Edit profiles and photos.` : "Edit profiles and photos"
+              }
             >
               <Avatar member={currentMember} size="sm" ring />
-              <span className="text-sm font-medium">{currentMember?.name}</span>
+              <span className="hidden text-sm font-medium sm:inline">{currentMember?.name}</span>
             </button>
             <button
               onClick={() => setCurrentMemberId(null)}
-              className="text-faint hover:bg-sunk hover:text-ink min-h-10 rounded-full px-3 py-1 text-xs font-semibold transition-colors"
+              className="text-faint hover:bg-sunk hover:text-ink grid min-h-10 min-w-10 place-items-center rounded-full px-2 py-1 text-xs font-semibold transition-colors sm:px-3"
               title="Switch to another profile"
+              aria-label="Switch to another profile"
             >
-              Switch
+              <span aria-hidden className="sm:hidden">⇄</span>
+              <span className="hidden sm:inline">Switch</span>
             </button>
           </div>
         </div>

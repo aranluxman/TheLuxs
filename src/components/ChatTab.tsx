@@ -189,21 +189,21 @@ function ReactionPills({
                 : "border-line bg-surface text-muted hover:bg-sunk"
             }`}
           >
-            <span aria-hidden>{s.emoji}</span>
-            {/* Faces beat a bare number in a five-person house — you can see at
-                a glance whether the person you care about laughed. */}
+            <span className="text-[13px] leading-none" aria-hidden>{s.emoji}</span>
+            {/* Faces answer "who", the number answers "how many". Two faces and
+                the digit 2 are not redundant at a glance — the digit is what
+                scans, the faces are what you actually care about. Capped at two
+                so a five-person pile-up cannot outgrow the bubble. */}
             <span className="flex -space-x-1.5" aria-hidden>
-              {people.slice(0, 3).map((p) => (
+              {people.slice(0, 2).map((p) => (
                 <span key={p.id} className="ring-surface rounded-full ring-2">
                   <Avatar member={p} size="xs" />
                 </span>
               ))}
             </span>
-            {people.length > 3 ? (
-              <span className="tabular-nums" aria-hidden>
-                +{people.length - 3}
-              </span>
-            ) : null}
+            <span className="min-w-[0.75rem] text-center tabular-nums" aria-hidden>
+              {s.memberIds.length}
+            </span>
           </button>
         );
       })}
@@ -303,10 +303,12 @@ export function ChatTab() {
     pinnedToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
   }
 
+  // Re-pin on anything that changes the thread's height: a new message, and
+  // the reaction pills that arrive on a later tick.
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (el && pinnedToBottom.current) el.scrollTop = el.scrollHeight;
-  }, [rows.length]);
+  }, [rows.length, reactions.count]);
 
   useEffect(() => {
     if (!loading && scrollRef.current) {
@@ -412,7 +414,7 @@ export function ChatTab() {
       <div
         ref={scrollRef}
         onScroll={onScroll}
-        className="chat-panel scroll-area border-line bg-surface flex-1 overflow-y-auto rounded-3xl border px-3 py-4 sm:px-5 sm:py-5"
+        className="chat-panel scroll-area border-line bg-surface flex-1 overflow-y-auto rounded-3xl border px-3 pt-4 pb-7 sm:px-5 sm:pt-5 sm:pb-8"
       >
         {loading ? (
           <div className="space-y-3 py-4" aria-label="Loading messages" role="status">
