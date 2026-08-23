@@ -25,8 +25,9 @@ function countdownLabel(days: number): string {
 }
 
 /**
- * The strip at the top of the Chores tab: a shared quote for the day, the next
- * thing on the family's calendar, and what each person is looking forward to.
+ * The strip at the top of the Calendar tab: a shared quote for the day, the
+ * next thing on the family's calendar, and what each person is looking
+ * forward to.
  */
 export function TodayCard() {
   const { members, currentMember } = useFamily();
@@ -118,7 +119,7 @@ export function TodayCard() {
               <div className="flex gap-2">
                 <button
                   onClick={save}
-                  className="bg-ink rounded-lg px-3 py-1.5 text-xs font-medium text-white"
+                  className="bg-ink text-on-ink rounded-lg px-3 py-1.5 text-xs font-medium"
                 >
                   Save
                 </button>

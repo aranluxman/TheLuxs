@@ -116,7 +116,7 @@ export function ProfileSheet({ open, onClose }: { open: boolean; onClose: () => 
             />
           </Field>
 
-          <Field label="Colour" hint="Used for their chores, calendar entries and chat bubbles.">
+          <Field label="Colour" hint="Used for their calendar entries and chat bubbles.">
             <div className="flex flex-wrap gap-2">
               {MEMBER_COLORS.map((c) => (
                 <button

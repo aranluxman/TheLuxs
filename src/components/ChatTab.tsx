@@ -2,13 +2,20 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useMessages, type OutgoingAttachment } from "@/hooks/useMessages";
+import { useReactions } from "@/hooks/useReactions";
 import { useVoiceRecorder } from "@/hooks/useVoiceRecorder";
 import { formatChatDay, formatTime, parseISO } from "@/lib/dates";
 import { tint } from "@/lib/palette";
 import { formatBytes, formatDuration, uploadMedia } from "@/lib/storage";
-import type { AttachmentKind, Message } from "@/lib/types";
+import {
+  REACTION_EMOJI,
+  type AttachmentKind,
+  type Message,
+  type ReactionEmoji,
+  type ReactionSummary,
+} from "@/lib/types";
 import { useFamily } from "./FamilyProvider";
-import { Avatar, ErrorNote } from "./ui";
+import { Avatar, Button, ErrorNote, Modal } from "./ui";
 
 /** Consecutive messages from one person inside this window are stacked. */
 const GROUP_WINDOW_MS = 5 * 60 * 1000;
@@ -70,17 +77,27 @@ function AttachmentView({
   if (!message.attachment_path || !message.attachment_kind) return null;
 
   if (!url) {
-    return <p className="text-xs opacity-70">Loading attachment…</p>;
+    return (
+      <p className="text-xs opacity-70" role="status">
+        Loading attachment…
+      </p>
+    );
   }
 
   if (message.attachment_kind === "image") {
     return (
-      <a href={url} target="_blank" rel="noreferrer" className="block">
+      <a
+        href={url}
+        target="_blank"
+        rel="noreferrer"
+        className="-mx-1 -mt-0.5 block overflow-hidden rounded-2xl"
+        title={message.attachment_name ?? "Open the full photo"}
+      >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={url}
           alt={message.attachment_name ?? "Shared photo"}
-          className="max-h-72 w-full rounded-xl object-cover"
+          className="max-h-80 w-full object-cover transition-transform duration-200 hover:scale-[1.015]"
           loading="lazy"
         />
       </a>
@@ -107,10 +124,14 @@ function AttachmentView({
       rel="noreferrer"
       download={message.attachment_name ?? undefined}
       className={`flex items-center gap-2.5 rounded-xl px-1 py-0.5 underline-offset-2 hover:underline ${
-        mine ? "text-white" : "text-ink"
+        mine ? "text-on-ink" : "text-ink"
       }`}
     >
-      <span className="text-xl" aria-hidden>
+      <span
+        className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-lg"
+        style={{ backgroundColor: "rgba(128,128,128,0.16)" }}
+        aria-hidden
+      >
         📎
       </span>
       <span className="min-w-0">
@@ -124,6 +145,112 @@ function AttachmentView({
         ) : null}
       </span>
     </a>
+  );
+}
+
+/* -------------------------------------------------------------- Reactions */
+
+/**
+ * The tallies under a bubble. Each pill shows the emoji, the faces of who left
+ * it, and a count once it stops being obvious — tapping toggles your own,
+ * which is the same gesture as adding one from the picker.
+ */
+function ReactionPills({
+  summaries,
+  onToggle,
+  align,
+}: {
+  summaries: ReactionSummary[];
+  onToggle: (emoji: ReactionEmoji) => void;
+  align: "start" | "end";
+}) {
+  const { byId } = useFamily();
+  if (summaries.length === 0) return null;
+
+  return (
+    <div
+      className={`mt-1 flex flex-wrap gap-1 ${align === "end" ? "justify-end" : "justify-start"}`}
+    >
+      {summaries.map((s) => {
+        const people = s.memberIds.map((id) => byId[id]).filter(Boolean);
+        const names = people.map((p) => p.name).join(", ");
+        return (
+          <button
+            key={s.emoji}
+            onClick={() => onToggle(s.emoji)}
+            title={`${names || "Someone"} reacted with ${s.emoji}`}
+            aria-pressed={s.mine}
+            aria-label={`${s.emoji}, ${s.memberIds.length} ${
+              s.memberIds.length === 1 ? "person" : "people"
+            }${s.mine ? ", including you" : ""}. Toggle your reaction.`}
+            className={`inline-flex items-center gap-1 rounded-full border py-0.5 pr-1.5 pl-1.5 text-[11px] transition-colors ${
+              s.mine
+                ? "border-accent bg-accent/12 text-ink font-semibold"
+                : "border-line bg-surface text-muted hover:bg-sunk"
+            }`}
+          >
+            <span aria-hidden>{s.emoji}</span>
+            {/* Faces beat a bare number in a five-person house — you can see at
+                a glance whether the person you care about laughed. */}
+            <span className="flex -space-x-1.5" aria-hidden>
+              {people.slice(0, 3).map((p) => (
+                <span key={p.id} className="ring-surface rounded-full ring-2">
+                  <Avatar member={p} size="xs" />
+                </span>
+              ))}
+            </span>
+            {people.length > 3 ? (
+              <span className="tabular-nums" aria-hidden>
+                +{people.length - 3}
+              </span>
+            ) : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** The three-emoji picker that opens when a message is tapped. */
+function ReactionPicker({
+  summaries,
+  onPick,
+  onDelete,
+}: {
+  summaries: ReactionSummary[];
+  onPick: (emoji: ReactionEmoji) => void;
+  onDelete: (() => void) | null;
+}) {
+  const mineFor = (emoji: ReactionEmoji) => summaries.some((s) => s.emoji === emoji && s.mine);
+
+  return (
+    <div className="border-line bg-surface flex items-center gap-0.5 rounded-full border p-1 shadow-lg">
+      {REACTION_EMOJI.map((emoji) => (
+        <button
+          key={emoji}
+          onClick={() => onPick(emoji)}
+          aria-pressed={mineFor(emoji)}
+          aria-label={`React with ${emoji}`}
+          className={`grid h-8 w-8 place-items-center rounded-full text-base transition-transform hover:scale-115 ${
+            mineFor(emoji) ? "bg-accent/15" : "hover:bg-sunk"
+          }`}
+        >
+          <span aria-hidden>{emoji}</span>
+        </button>
+      ))}
+      {onDelete ? (
+        <>
+          <span className="bg-line mx-0.5 h-5 w-px" aria-hidden />
+          <button
+            onClick={onDelete}
+            aria-label="Delete this message for everyone"
+            className="text-faint hover:bg-danger-soft hover:text-danger grid h-8 w-8 place-items-center rounded-full text-sm"
+          >
+            <span aria-hidden>🗑</span>
+          </button>
+        </>
+      ) : null}
+    </div>
   );
 }
 
@@ -142,21 +269,31 @@ export function ChatTab() {
     deleteMessage,
     loadOlder,
   } = useMessages();
+  const reactions = useReactions();
   const recorder = useVoiceRecorder();
 
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  /** Message whose reaction picker is open. */
+  const [activeId, setActiveId] = useState<string | null>(null);
+  /** Message queued for deletion, held until the prompt is answered. */
+  const [pendingDelete, setPendingDelete] = useState<Message | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const pinnedToBottom = useRef(true);
 
-  const rows = useMemo(
-    () => render(messages, currentMember?.id ?? null),
-    [messages, currentMember],
-  );
+  const meId = currentMember?.id ?? null;
+  const rows = useMemo(() => render(messages, meId), [messages, meId]);
+
+  // Pull reactions for whatever is on screen, including pages loaded later.
+  const messageIds = useMemo(() => messages.map((m) => m.id), [messages]);
+  const { ensureFor } = reactions;
+  useEffect(() => {
+    if (messageIds.length) void ensureFor(messageIds);
+  }, [messageIds, ensureFor]);
 
   // Only auto-scroll when the reader was already at the bottom — otherwise a
   // new message would yank them out of the history they are scrolled back into.
@@ -176,6 +313,16 @@ export function ChatTab() {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [loading]);
+
+  // Dismiss the picker on Escape, matching the modal's behaviour.
+  useEffect(() => {
+    if (!activeId) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setActiveId(null);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [activeId]);
 
   async function submitText(e?: React.FormEvent) {
     e?.preventDefault();
@@ -240,22 +387,38 @@ export function ChatTab() {
     setBusy(null);
   }
 
+  async function confirmDelete() {
+    if (!pendingDelete || !currentMember) return;
+    setDeleting(true);
+    await deleteMessage(pendingDelete.id, currentMember.id);
+    setDeleting(false);
+    setPendingDelete(null);
+    setActiveId(null);
+  }
+
+  function toggleReaction(messageId: string, emoji: ReactionEmoji) {
+    if (!currentMember) return;
+    void reactions.toggle(messageId, currentMember.id, emoji);
+    setActiveId(null);
+  }
+
   const canSend = Boolean(currentMember) && !busy;
+  const deletingPhoto = pendingDelete?.attachment_kind === "image";
 
   return (
     <div className="flex h-[calc(100dvh-12.5rem)] flex-col sm:h-[calc(100dvh-9.5rem)]">
-      <ErrorNote message={error ?? uploadError ?? recorder.error} />
+      <ErrorNote message={error ?? uploadError ?? reactions.error ?? recorder.error} />
 
       <div
         ref={scrollRef}
         onScroll={onScroll}
-        className="scroll-area border-line bg-surface flex-1 overflow-y-auto rounded-2xl border px-3 py-4"
+        className="scroll-area border-line bg-surface flex-1 overflow-y-auto rounded-3xl border px-3 py-4 sm:px-4"
       >
         {loading ? (
           <p className="text-muted py-8 text-center text-sm">Loading messages…</p>
         ) : rows.length === 0 ? (
           <div className="text-muted flex h-full flex-col items-center justify-center gap-2 text-center">
-            <span className="text-3xl" aria-hidden>
+            <span className="text-4xl" aria-hidden>
               💬
             </span>
             <p className="text-ink text-sm font-medium">No messages yet</p>
@@ -264,11 +427,11 @@ export function ChatTab() {
         ) : (
           <>
             {hasOlder ? (
-              <div className="mb-4 text-center">
+              <div className="mb-5 text-center">
                 <button
                   onClick={loadOlder}
                   disabled={loadingOlder}
-                  className="border-line text-muted hover:bg-sunk rounded-full border px-3 py-1 text-xs"
+                  className="border-line text-muted hover:bg-sunk rounded-full border px-3.5 py-1.5 text-xs font-medium transition-colors disabled:opacity-50"
                 >
                   {loadingOlder ? "Loading…" : "Load earlier messages"}
                 </button>
@@ -279,19 +442,30 @@ export function ChatTab() {
               const sender = r.message.sender_id ? byId[r.message.sender_id] : null;
               const gone = Boolean(r.message.deleted_at);
               const remover = r.message.deleted_by ? byId[r.message.deleted_by] : null;
+              const summaries = reactions.summarise(r.message.id, meId);
+              const isActive = activeId === r.message.id;
+              const color = sender?.color ?? "#78716c";
+              // Delete is offered only on your own messages. `deleteMessage`
+              // re-checks this against the row itself, so the UI is a
+              // convenience rather than the enforcement point.
+              const canDelete = !gone && Boolean(currentMember) && r.mine;
 
               return (
                 <div key={r.message.id}>
                   {r.daySeparator ? (
-                    <p className="text-faint my-4 text-center text-[11px] font-medium">
-                      {r.daySeparator}
-                    </p>
+                    <div className="my-5 flex items-center gap-3">
+                      <span className="bg-line h-px flex-1" aria-hidden />
+                      <span className="text-faint text-[11px] font-semibold tracking-wide">
+                        {r.daySeparator}
+                      </span>
+                      <span className="bg-line h-px flex-1" aria-hidden />
+                    </div>
                   ) : null}
 
                   <div
                     className={`group flex items-end gap-2 ${
                       r.mine ? "justify-end" : "justify-start"
-                    } ${r.endsGroup ? "mb-2.5" : "mb-0.5"}`}
+                    } ${r.endsGroup ? "mb-3" : "mb-1"}`}
                   >
                     {!r.mine ? (
                       <span className={r.endsGroup ? "" : "invisible"}>
@@ -300,14 +474,14 @@ export function ChatTab() {
                     ) : null}
 
                     <div
-                      className={`flex max-w-[78%] flex-col ${
+                      className={`flex min-w-0 max-w-[78%] flex-col ${
                         r.mine ? "items-end" : "items-start"
                       }`}
                     >
                       {!r.mine && r.startsGroup ? (
                         <span
-                          className="mb-0.5 ml-1 text-[11px] font-semibold"
-                          style={{ color: sender?.color ?? "#78716c" }}
+                          className="mb-1 ml-1.5 text-[11px] font-semibold tracking-wide"
+                          style={{ color }}
                         >
                           {sender?.name ?? "Unknown"}
                         </span>
@@ -318,59 +492,77 @@ export function ChatTab() {
                           Message deleted{remover ? ` by ${remover.name}` : ""}
                         </div>
                       ) : (
-                        <div
-                          className={`space-y-1.5 px-3.5 py-2 text-sm break-words whitespace-pre-wrap ${
-                            r.mine ? "bg-ink text-white" : "text-ink"
-                          }`}
-                          style={{
-                            backgroundColor: r.mine
-                              ? undefined
-                              : tint(sender?.color ?? "#78716c", 0.13),
-                            borderRadius: 18,
-                            borderBottomRightRadius: r.mine && r.endsGroup ? 5 : 18,
-                            borderBottomLeftRadius: !r.mine && r.endsGroup ? 5 : 18,
-                          }}
-                        >
-                          <AttachmentView
-                            message={r.message}
-                            url={
-                              r.message.attachment_path
-                                ? mediaUrls[r.message.attachment_path]
-                                : undefined
-                            }
-                            mine={r.mine}
-                          />
-                          {r.message.message_text ? <p>{r.message.message_text}</p> : null}
+                        <div className="relative">
+                          {/* Tapping the bubble opens the picker, but clicks
+                              that land on a link or a player belong to that
+                              control — opening a photo must not also react. */}
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            aria-haspopup="menu"
+                            aria-expanded={isActive}
+                            aria-label={`Message from ${
+                              r.mine ? "you" : (sender?.name ?? "someone")
+                            } at ${formatTime(r.at)}. Activate to react.`}
+                            onClick={(e) => {
+                              if ((e.target as HTMLElement).closest("a, audio, button")) return;
+                              setActiveId(isActive ? null : r.message.id);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key !== "Enter" && e.key !== " ") return;
+                              if ((e.target as HTMLElement).closest("a, audio, button")) return;
+                              e.preventDefault();
+                              setActiveId(isActive ? null : r.message.id);
+                            }}
+                            className={`cursor-pointer space-y-1.5 px-3.5 py-2 text-sm break-words whitespace-pre-wrap shadow-sm transition-shadow hover:shadow-md ${
+                              r.mine ? "bg-ink text-on-ink" : "text-ink"
+                            } ${isActive ? "ring-accent/45 ring-2" : ""}`}
+                            style={{
+                              backgroundColor: r.mine ? undefined : tint(color, 0.16),
+                              borderRadius: 20,
+                              borderBottomRightRadius: r.mine && r.endsGroup ? 6 : 20,
+                              borderBottomLeftRadius: !r.mine && r.endsGroup ? 6 : 20,
+                            }}
+                          >
+                            <AttachmentView
+                              message={r.message}
+                              url={
+                                r.message.attachment_path
+                                  ? mediaUrls[r.message.attachment_path]
+                                  : undefined
+                              }
+                              mine={r.mine}
+                            />
+                            {r.message.message_text ? <p>{r.message.message_text}</p> : null}
+                          </div>
+
+                          {isActive ? (
+                            <div
+                              className={`absolute -top-11 z-20 ${r.mine ? "right-0" : "left-0"}`}
+                            >
+                              <ReactionPicker
+                                summaries={summaries}
+                                onPick={(emoji) => toggleReaction(r.message.id, emoji)}
+                                onDelete={
+                                  canDelete ? () => setPendingDelete(r.message) : null
+                                }
+                              />
+                            </div>
+                          ) : null}
                         </div>
                       )}
 
-                      <span className="text-faint mt-1 flex items-center gap-2 px-1 text-[10px]">
-                        {r.endsGroup ? formatTime(r.at) : null}
-                        {!gone && currentMember ? (
-                          confirmDelete === r.message.id ? (
-                            <>
-                              <button
-                                onClick={async () => {
-                                  await deleteMessage(r.message.id, currentMember.id);
-                                  setConfirmDelete(null);
-                                }}
-                                className="font-semibold text-red-700"
-                              >
-                                Delete
-                              </button>
-                              <button onClick={() => setConfirmDelete(null)}>Cancel</button>
-                            </>
-                          ) : (
-                            <button
-                              onClick={() => setConfirmDelete(r.message.id)}
-                              className="opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100"
-                              aria-label="Delete this message"
-                            >
-                              Delete
-                            </button>
-                          )
-                        ) : null}
-                      </span>
+                      <ReactionPills
+                        summaries={summaries}
+                        onToggle={(emoji) => toggleReaction(r.message.id, emoji)}
+                        align={r.mine ? "end" : "start"}
+                      />
+
+                      {r.endsGroup ? (
+                        <span className="text-faint mt-1 px-1 text-[10px] tabular-nums">
+                          {formatTime(r.at)}
+                        </span>
+                      ) : null}
                     </div>
                   </div>
                 </div>
@@ -383,7 +575,10 @@ export function ChatTab() {
       {/* ------------------------------------------------------- composer */}
       {recorder.recording ? (
         <div className="border-line bg-surface mt-3 flex items-center gap-3 rounded-2xl border px-4 py-3">
-          <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-red-600" aria-hidden />
+          <span
+            className="bg-danger h-2.5 w-2.5 animate-pulse rounded-full"
+            aria-hidden
+          />
           <span className="text-sm font-medium tabular-nums">
             {formatDuration(recorder.seconds)}
           </span>
@@ -396,7 +591,7 @@ export function ChatTab() {
           </button>
           <button
             onClick={finishRecording}
-            className="bg-ink grid h-10 w-10 place-items-center rounded-full text-white"
+            className="bg-ink text-on-ink grid h-10 w-10 place-items-center rounded-full"
             aria-label="Send voice note"
           >
             ↑
@@ -416,7 +611,7 @@ export function ChatTab() {
             type="button"
             onClick={() => fileInputRef.current?.click()}
             disabled={!canSend}
-            className="border-line hover:bg-sunk grid h-11 w-11 shrink-0 place-items-center rounded-full border text-lg disabled:opacity-40"
+            className="border-line hover:bg-sunk grid h-11 w-11 shrink-0 place-items-center rounded-full border text-lg transition-colors disabled:opacity-40"
             aria-label="Attach a file or photo"
             title="Attach a file or photo"
           >
@@ -436,7 +631,8 @@ export function ChatTab() {
             rows={1}
             maxLength={2000}
             placeholder={
-              busy ?? (currentMember ? `Message as ${currentMember.name}…` : "Pick a profile first")
+              busy ??
+              (currentMember ? `Message as ${currentMember.name}…` : "Pick a profile first")
             }
             disabled={!canSend}
             className="border-line bg-surface text-ink placeholder:text-faint focus:border-ink max-h-32 min-h-[2.75rem] flex-1 resize-none rounded-2xl border px-4 py-3 text-sm focus:outline-none disabled:opacity-60"
@@ -446,7 +642,7 @@ export function ChatTab() {
             <button
               type="submit"
               disabled={!canSend}
-              className="bg-ink grid h-11 w-11 shrink-0 place-items-center rounded-full text-white disabled:opacity-35"
+              className="bg-ink text-on-ink grid h-11 w-11 shrink-0 place-items-center rounded-full disabled:opacity-35"
               aria-label="Send message"
             >
               ↑
@@ -457,7 +653,7 @@ export function ChatTab() {
               onClick={recorder.start}
               disabled={!canSend || !recorder.supported}
               title={recorder.supported ? "Record a voice note" : "Recording isn't supported here"}
-              className="border-line hover:bg-sunk grid h-11 w-11 shrink-0 place-items-center rounded-full border text-lg disabled:opacity-40"
+              className="border-line hover:bg-sunk grid h-11 w-11 shrink-0 place-items-center rounded-full border text-lg transition-colors disabled:opacity-40"
               aria-label="Record a voice note"
             >
               🎤
@@ -465,6 +661,38 @@ export function ChatTab() {
           )}
         </form>
       )}
+
+      {/* Deletion is for everyone and the file leaves the bucket with it, so
+          it gets a real prompt rather than an inline undo affordance. */}
+      <Modal
+        open={Boolean(pendingDelete)}
+        onClose={() => (deleting ? undefined : setPendingDelete(null))}
+        title={deletingPhoto ? "Delete this photo?" : "Delete this message?"}
+      >
+        <p className="text-muted text-sm">
+          This removes it for everyone in the family, on every device.
+          {pendingDelete?.attachment_path ? (
+            <>
+              {" "}
+              The {deletingPhoto ? "photo" : "attached file"} is deleted from storage too and
+              cannot be recovered.
+            </>
+          ) : null}
+        </p>
+        <div className="mt-5 flex justify-end gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={deleting}
+            onClick={() => setPendingDelete(null)}
+          >
+            Cancel
+          </Button>
+          <Button type="button" variant="danger" disabled={deleting} onClick={confirmDelete}>
+            {deleting ? "Deleting…" : "Delete for everyone"}
+          </Button>
+        </div>
+      </Modal>
     </div>
   );
 }

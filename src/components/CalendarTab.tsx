@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useCalendarEntries } from "@/hooks/useCalendarEntries";
-import { useChores } from "@/hooks/useChores";
+import { useCalendarAutoSync } from "@/hooks/useCalendarFeeds";
 import { useEvents } from "@/hooks/useEvents";
 import {
   addDays,
@@ -11,38 +11,48 @@ import {
   formatDayLabel,
   formatTime,
   isSameDay,
-  monthGridDays,
+  parseDayKey,
   parseISO,
-  startOfWeekMon,
   toLocalInputValue,
-  weekDays,
 } from "@/lib/dates";
 import { CALENDAR_CATEGORIES, tint } from "@/lib/palette";
-import type { AgendaItem, CalendarEntry, Chore, EventRsvp, FamilyEvent } from "@/lib/types";
+import type { AgendaItem, CalendarEntry, EventRsvp, FamilyEvent } from "@/lib/types";
 import { CalendarFeeds } from "./CalendarFeeds";
 import { useFamily } from "./FamilyProvider";
+import { TodayCard } from "./TodayCard";
 import {
+  Avatar,
   Button,
   Card,
   EmptyState,
   ErrorNote,
   Field,
   Modal,
-  SectionTitle,
   inputClass,
 } from "./ui";
 
-const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+/** How far ahead each range option looks. */
+const RANGES = [
+  { id: "2w", label: "2 weeks", days: 14 },
+  { id: "4w", label: "4 weeks", days: 28 },
+  { id: "3m", label: "3 months", days: 92 },
+] as const;
+
+type RangeId = (typeof RANGES)[number]["id"];
+
+/** `null` is the "Everyone" tab. */
+type PersonFilter = string | null;
 
 /**
- * Flattens the three sources — posted events, personal schedule entries and
- * chore deadlines — into one list the calendar can lay out uniformly.
+ * Flattens the two sources — posted events and personal/imported schedule
+ * entries — into one list the agenda can lay out uniformly. Chores used to be
+ * a third source; the feature is gone, and with it the only item kind that had
+ * no time of day of its own.
  */
 function buildAgenda(
   events: FamilyEvent[],
   rsvps: EventRsvp[],
   entries: CalendarEntry[],
-  chores: Chore[],
 ): AgendaItem[] {
   const items: AgendaItem[] = [];
 
@@ -72,26 +82,12 @@ function buildAgenda(
       title: c.title,
       subtitle: c.category === "general" ? null : c.category,
       day: dayKey(start),
-      // All-day imports have no meaningful clock time; treat them like chores.
+      // All-day imports have no meaningful clock time.
       start: c.all_day ? null : start,
       end: c.all_day ? null : c.end_time ? parseISO(c.end_time) : null,
       memberIds: c.member_id ? [c.member_id] : [],
       allDay: c.all_day,
       readOnly: Boolean(c.source_feed_id),
-    });
-  }
-
-  for (const c of chores) {
-    items.push({
-      id: `chore:${c.id}`,
-      kind: "chore",
-      title: c.title,
-      subtitle: c.recurrence_type === "weekly" ? "weekly chore" : "chore",
-      day: c.due_date,
-      start: null, // deadlines are all-day
-      end: null,
-      memberIds: c.assigned_member_id ? [c.assigned_member_id] : [],
-      done: c.is_completed,
     });
   }
 
@@ -103,55 +99,99 @@ function buildAgenda(
   });
 }
 
-const KIND_ICON = { event: "🎟️", entry: "•", chore: "🧽" } as const;
+/**
+ * Does this item belong on `person`'s tab?
+ *
+ * An event nobody has claimed yet is household-wide, so it stays visible on
+ * every tab — otherwise "Dad's schedule" would silently hide the trip the
+ * whole family is going on. A personal entry with no owner is a data quirk
+ * rather than a household item, so it only shows under Everyone.
+ */
+function belongsTo(item: AgendaItem, person: PersonFilter): boolean {
+  if (person === null) return true;
+  if (item.memberIds.includes(person)) return true;
+  return item.kind === "event" && item.memberIds.length === 0;
+}
 
-function AgendaRow({ item }: { item: AgendaItem }) {
+/* ------------------------------------------------------------- Agenda row */
+
+const KIND_ICON = { event: "🎟️", entry: "•" } as const;
+
+function AgendaRow({
+  item,
+  onDelete,
+}: {
+  item: AgendaItem;
+  onDelete: (() => void) | null;
+}) {
   const { byId } = useFamily();
   const owners = item.memberIds.map((id) => byId[id]).filter(Boolean);
   const color = owners[0]?.color ?? "#a8a29e";
 
   return (
-    <li className="flex items-start gap-3 py-2">
+    <li className="group hover:bg-sunk/50 flex items-start gap-3 rounded-xl px-2 py-2.5 transition-colors">
+      {/* A colour bar reads faster than a dot at a glance across the kitchen. */}
       <span
-        className="mt-1.5 h-2 w-2 shrink-0 rounded-full"
+        className="mt-0.5 w-1 shrink-0 self-stretch rounded-full"
         style={{ backgroundColor: color }}
         aria-hidden
       />
+
+      <span className="w-16 shrink-0 pt-0.5 text-xs font-semibold tabular-nums">
+        {item.start ? (
+          formatTime(item.start)
+        ) : (
+          <span className="text-faint font-medium">All day</span>
+        )}
+      </span>
+
       <div className="min-w-0 flex-1">
-        <p className={`text-sm ${item.done ? "text-faint line-through" : "font-medium"}`}>
+        <p className="text-sm font-medium">
           <span className="mr-1.5 text-xs" aria-hidden>
             {KIND_ICON[item.kind]}
           </span>
           {item.title}
         </p>
-        <p className="text-faint text-xs">
-          {item.start ? formatTime(item.start) : "All day"}
-          {item.end ? `–${formatTime(item.end)}` : ""}
-          {item.subtitle ? ` · ${item.subtitle}` : ""}
-          {owners.length ? ` · ${owners.map((o) => o.name).join(", ")}` : ""}
+        <p className="text-faint mt-0.5 text-xs">
+          {item.end ? `until ${formatTime(item.end)}` : null}
+          {item.end && item.subtitle ? " · " : null}
+          {item.subtitle}
+          {(item.end || item.subtitle) && owners.length ? " · " : null}
+          {owners.map((o) => o.name).join(", ")}
         </p>
       </div>
+
+      <span className="flex shrink-0 -space-x-1.5 pt-0.5">
+        {owners.slice(0, 3).map((o) => (
+          <span key={o.id} className="ring-surface rounded-full ring-2">
+            <Avatar member={o} size="sm" />
+          </span>
+        ))}
+      </span>
+
+      {onDelete ? (
+        <button
+          onClick={onDelete}
+          className="text-faint hover:bg-danger-soft hover:text-danger h-7 w-7 shrink-0 rounded-full opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100"
+          aria-label={`Delete ${item.title}`}
+        >
+          ×
+        </button>
+      ) : null}
     </li>
   );
 }
 
+/* ------------------------------------------------------------------- Tab */
+
 export function CalendarTab() {
   const { members, currentMember } = useFamily();
-  const [view, setView] = useState<"month" | "week">("month");
-  const [anchor, setAnchor] = useState(() => new Date());
-  const [selected, setSelected] = useState<Date>(() => new Date());
-  const [hidden, setHidden] = useState<Set<string>>(new Set());
+
+  const [person, setPerson] = useState<PersonFilter>(null);
+  const [range, setRange] = useState<RangeId>("4w");
   const [open, setOpen] = useState(false);
   const [feedsOpen, setFeedsOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-
-  // The chore query window follows whichever grid is on screen.
-  const grid = useMemo(
-    () => (view === "month" ? monthGridDays(anchor) : weekDays(anchor)),
-    [view, anchor],
-  );
-  const fromKey = dayKey(grid[0]);
-  const toKey = dayKey(grid[grid.length - 1]);
 
   const { events, rsvps, error: eventsError } = useEvents();
   const {
@@ -161,7 +201,11 @@ export function CalendarTab() {
     deleteEntry,
     reload: reloadEntries,
   } = useCalendarEntries();
-  const { chores, error: choresError } = useChores(fromKey, toKey);
+
+  // Subscribed iCal feeds refresh themselves in the background; entries reload
+  // whenever a run brings something new in.
+  const onSynced = useCallback(() => void reloadEntries(), [reloadEntries]);
+  const { lastSyncedAt } = useCalendarAutoSync(onSynced);
 
   const [form, setForm] = useState(() => ({
     member_id: "",
@@ -171,53 +215,56 @@ export function CalendarTab() {
     category: "general" as string,
   }));
 
+  const days = RANGES.find((r) => r.id === range)!.days;
+
+  // Pinned per render pass rather than per keystroke: both bounds are derived
+  // from one clock read so an item can never fall between them.
+  const { fromKey, toKey } = useMemo(() => {
+    const now = new Date();
+    return { fromKey: dayKey(now), toKey: dayKey(addDays(now, days)) };
+  }, [days]);
+
   const agenda = useMemo(
-    () => buildAgenda(events, rsvps, entries, chores),
-    [events, rsvps, entries, chores],
+    () => buildAgenda(events, rsvps, entries),
+    [events, rsvps, entries],
   );
 
-  const filtered = useMemo(
-    () =>
-      agenda.filter(
-        (i) =>
-          // Items with no owner (an event nobody claimed) always stay visible.
-          i.memberIds.length === 0 || i.memberIds.some((id) => !hidden.has(id)),
-      ),
-    [agenda, hidden],
+  /** Everything ahead of us in the window, before the person filter. */
+  const upcoming = useMemo(
+    () => agenda.filter((i) => i.day >= fromKey && i.day <= toKey),
+    [agenda, fromKey, toKey],
+  );
+
+  // Tab counts come from `upcoming`, not the filtered list, so each tab
+  // advertises what it holds rather than what is currently shown.
+  const countFor = useCallback(
+    (p: PersonFilter) => upcoming.filter((i) => belongsTo(i, p)).length,
+    [upcoming],
+  );
+
+  const visible = useMemo(
+    () => upcoming.filter((i) => belongsTo(i, person)),
+    [upcoming, person],
   );
 
   const byDay = useMemo(() => {
-    const map: Record<string, AgendaItem[]> = {};
-    for (const i of filtered) (map[i.day] ??= []).push(i);
-    return map;
-  }, [filtered]);
-
-  const selectedKey = dayKey(selected);
-  const monthLabel = format(anchor, view === "month" ? "MMMM yyyy" : "MMMM yyyy");
-
-  function shift(delta: number) {
-    const next =
-      view === "month"
-        ? new Date(anchor.getFullYear(), anchor.getMonth() + delta, 1)
-        : addDays(startOfWeekMon(anchor), delta * 7);
-    setAnchor(next);
-  }
-
-  function toggleMember(id: string) {
-    setHidden((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
+    const map = new Map<string, AgendaItem[]>();
+    for (const i of visible) {
+      const bucket = map.get(i.day);
+      if (bucket) bucket.push(i);
+      else map.set(i.day, [i]);
+    }
+    // `visible` is already sorted by day, so insertion order is chronological.
+    return [...map.entries()];
+  }, [visible]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!form.title.trim()) return;
     setSaving(true);
     const ok = await createEntry({
-      member_id: form.member_id || currentMember?.id || null,
+      // Adding from a person's tab defaults the entry to that person.
+      member_id: form.member_id || person || currentMember?.id || null,
       title: form.title.trim(),
       start_time: new Date(form.start_time).toISOString(),
       end_time: form.end_time ? new Date(form.end_time).toISOString() : null,
@@ -230,51 +277,41 @@ export function CalendarTab() {
     }
   }
 
-  const error = eventsError ?? entriesError ?? choresError;
+  const activePerson = person ? members.find((m) => m.id === person) : null;
+  const error = eventsError ?? entriesError;
 
   return (
     <div className="space-y-6">
       <ErrorNote message={error} />
 
+      <TodayCard />
+
+      {/* ----------------------------------------------------------- header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => shift(-1)}
-            className="border-line hover:bg-sunk grid h-9 w-9 place-items-center rounded-xl border"
-            aria-label="Previous"
-          >
-            ‹
-          </button>
-          <h2 className="min-w-[9.5rem] text-center text-lg font-semibold">{monthLabel}</h2>
-          <button
-            onClick={() => shift(1)}
-            className="border-line hover:bg-sunk grid h-9 w-9 place-items-center rounded-xl border"
-            aria-label="Next"
-          >
-            ›
-          </button>
-          <button
-            onClick={() => {
-              setAnchor(new Date());
-              setSelected(new Date());
-            }}
-            className="text-muted hover:text-ink ml-1 text-sm"
-          >
-            Today
-          </button>
+        <div>
+          <h2 className="text-xl font-semibold">
+            {activePerson ? `${activePerson.name}'s schedule` : "What's coming up"}
+          </h2>
+          <p className="text-faint mt-0.5 text-xs">
+            Next {RANGES.find((r) => r.id === range)!.label}
+            {lastSyncedAt
+              ? ` · feeds synced ${format(new Date(lastSyncedAt), "h:mm a")}`
+              : null}
+          </p>
         </div>
 
         <div className="flex items-center gap-2">
-          <div className="bg-sunk inline-flex rounded-xl p-1">
-            {(["month", "week"] as const).map((v) => (
+          <div className="bg-sunk inline-flex rounded-xl p-1" role="group" aria-label="Range">
+            {RANGES.map((r) => (
               <button
-                key={v}
-                onClick={() => setView(v)}
-                className={`rounded-lg px-3 py-1.5 text-sm font-medium capitalize ${
-                  view === v ? "bg-surface text-ink shadow-sm" : "text-muted"
+                key={r.id}
+                onClick={() => setRange(r.id)}
+                aria-pressed={range === r.id}
+                className={`rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                  range === r.id ? "bg-surface text-ink shadow-sm" : "text-muted"
                 }`}
               >
-                {v}
+                {r.label}
               </button>
             ))}
           </div>
@@ -285,140 +322,114 @@ export function CalendarTab() {
         </div>
       </div>
 
-      {/* Colour key doubles as a per-member filter. */}
-      <div className="flex flex-wrap gap-2">
+      {/* -------------------------------------------------------- person tabs */}
+      <div
+        className="scroll-area -mx-1 flex gap-2 overflow-x-auto px-1 pb-1"
+        role="tablist"
+        aria-label="Whose schedule"
+      >
+        <button
+          role="tab"
+          aria-selected={person === null}
+          onClick={() => setPerson(null)}
+          className={`inline-flex shrink-0 items-center gap-2 rounded-full border px-3.5 py-2 text-sm font-medium transition-colors ${
+            person === null
+              ? "border-ink bg-ink text-on-ink"
+              : "border-line bg-surface text-muted hover:bg-sunk"
+          }`}
+        >
+          <span aria-hidden>👪</span>
+          Everyone
+          <span className="text-[11px] tabular-nums opacity-70">{countFor(null)}</span>
+        </button>
+
         {members.map((m) => {
-          const off = hidden.has(m.id);
+          const active = person === m.id;
           return (
             <button
               key={m.id}
-              onClick={() => toggleMember(m.id)}
-              aria-pressed={!off}
-              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-opacity ${
-                off ? "opacity-40" : ""
+              role="tab"
+              aria-selected={active}
+              onClick={() => setPerson(active ? null : m.id)}
+              className={`inline-flex shrink-0 items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
+                active ? "text-ink" : "border-line bg-surface text-muted hover:bg-sunk"
               }`}
-              style={{ backgroundColor: tint(m.color, 0.14), color: m.color }}
+              style={
+                active
+                  ? { borderColor: m.color, backgroundColor: tint(m.color, 0.14) }
+                  : undefined
+              }
             >
-              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: m.color }} />
+              <Avatar member={m} size="sm" ring={active} />
               {m.name}
+              <span className="text-[11px] tabular-nums opacity-70">{countFor(m.id)}</span>
             </button>
           );
         })}
       </div>
 
-      {view === "month" ? (
-        <Card className="overflow-hidden">
-          <div className="border-line text-muted grid grid-cols-7 border-b text-center text-[11px] font-semibold">
-            {WEEKDAY_LABELS.map((d) => (
-              <div key={d} className="py-2">
-                {d}
-              </div>
-            ))}
-          </div>
-          <div className="grid grid-cols-7">
-            {grid.map((d) => {
-              const key = dayKey(d);
-              const items = byDay[key] ?? [];
-              const inMonth = d.getMonth() === anchor.getMonth();
-              const isToday = isSameDay(d, new Date());
-              const isSelected = key === selectedKey;
-              return (
-                <button
-                  key={key}
-                  onClick={() => setSelected(d)}
-                  className={`border-line hover:bg-sunk/60 min-h-[4.5rem] border-r border-b p-1.5 text-left transition-colors last:border-r-0 ${
-                    inMonth ? "" : "bg-sunk/30"
-                  } ${isSelected ? "bg-sunk" : ""}`}
-                >
-                  <span
-                    className={`grid h-6 w-6 place-items-center rounded-full text-xs ${
-                      isToday ? "bg-ink font-semibold text-white" : ""
-                    } ${inMonth ? "" : "text-faint"}`}
-                  >
-                    {format(d, "d")}
-                  </span>
-                  <span className="mt-1 flex flex-wrap gap-0.5">
-                    {items.slice(0, 4).map((i) => (
-                      <span
-                        key={i.id}
-                        className="h-1.5 w-1.5 rounded-full"
-                        style={{
-                          backgroundColor: i.memberIds[0]
-                            ? (members.find((m) => m.id === i.memberIds[0])?.color ?? "#a8a29e")
-                            : "#a8a29e",
-                          opacity: i.done ? 0.35 : 1,
-                        }}
-                      />
-                    ))}
-                    {items.length > 4 ? (
-                      <span className="text-faint text-[9px] leading-none">
-                        +{items.length - 4}
-                      </span>
-                    ) : null}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+      {/* ------------------------------------------------------------ agenda */}
+      {byDay.length === 0 ? (
+        <Card>
+          <EmptyState
+            icon="🗓️"
+            title={
+              activePerson
+                ? `Nothing on ${activePerson.name}'s calendar`
+                : "Nothing coming up"
+            }
+            hint={
+              activePerson
+                ? "Add something, or connect their calendar feed so it fills in automatically."
+                : "Add an entry, or subscribe to everyone's calendar under Feeds."
+            }
+          />
         </Card>
       ) : (
-        <div className="space-y-3">
-          {grid.map((d) => {
-            const key = dayKey(d);
-            const items = byDay[key] ?? [];
+        <div className="space-y-4">
+          {byDay.map(([key, items]) => {
+            const date = parseDayKey(key);
+            const today = isSameDay(date, new Date());
             return (
-              <Card key={key} className="px-4 py-3">
-                <p
-                  className={`mb-1 text-sm font-semibold ${
-                    isSameDay(d, new Date()) ? "text-accent" : ""
+              // The day heading sticks to the page, not to the card. It must
+              // therefore live *outside* any `overflow-hidden` ancestor —
+              // that property makes an element a scroll container, and a
+              // sticky child would then offset itself inside the card and sit
+              // on top of the first row instead of tracking the page.
+              <section key={key}>
+                <div
+                  className={`bg-canvas/90 sticky top-14 z-10 flex items-baseline gap-2 px-2 py-2 backdrop-blur ${
+                    today ? "text-accent" : ""
                   }`}
                 >
-                  {formatDayLabel(d)}
-                </p>
-                {items.length === 0 ? (
-                  <p className="text-faint text-xs">Nothing scheduled</p>
-                ) : (
-                  <ul className="divide-line divide-y">
+                  <h3 className="text-sm font-semibold">{formatDayLabel(date)}</h3>
+                  <span className="text-faint text-xs">{format(date, "MMM d")}</span>
+                  <span className="text-faint ml-auto text-xs tabular-nums">
+                    {items.length}
+                  </span>
+                </div>
+                <Card>
+                  <ul className="p-2">
                     {items.map((i) => (
-                      <AgendaRow key={i.id} item={i} />
+                      <AgendaRow
+                        key={i.id}
+                        item={i}
+                        // Feed imports resync, so removing one here is
+                        // pointless; events are managed on their own tab.
+                        onDelete={
+                          i.kind === "entry" && !i.readOnly
+                            ? () => void deleteEntry(i.id.replace("entry:", ""))
+                            : null
+                        }
+                      />
                     ))}
                   </ul>
-                )}
-              </Card>
+                </Card>
+              </section>
             );
           })}
         </div>
       )}
-
-      {view === "month" ? (
-        <section>
-          <SectionTitle>{formatDayLabel(selected)}</SectionTitle>
-          <Card className="px-4 py-2">
-            {(byDay[selectedKey] ?? []).length === 0 ? (
-              <EmptyState icon="🗓️" title="Nothing scheduled" />
-            ) : (
-              <ul className="divide-line divide-y">
-                {(byDay[selectedKey] ?? []).map((i) => (
-                  <div key={i.id} className="flex items-center gap-2">
-                    <div className="flex-1">
-                      <AgendaRow item={i} />
-                    </div>
-                    {i.kind === "entry" && !i.readOnly ? (
-                      <button
-                        onClick={() => deleteEntry(i.id.replace("entry:", ""))}
-                        className="text-faint h-7 w-7 shrink-0 rounded-full hover:bg-red-50 hover:text-red-700"
-                        aria-label={`Delete ${i.title}`}
-                      >
-                        ×
-                      </button>
-                    ) : null}
-                  </div>
-                ))}
-              </ul>
-            )}
-          </Card>
-        </section>
-      ) : null}
 
       <CalendarFeeds
         open={feedsOpen}
@@ -430,7 +441,7 @@ export function CalendarTab() {
         <form onSubmit={submit} className="space-y-4">
           <Field label="Who's it for?">
             <select
-              value={form.member_id || currentMember?.id || ""}
+              value={form.member_id || person || currentMember?.id || ""}
               onChange={(e) => setForm({ ...form, member_id: e.target.value })}
               className={inputClass}
             >

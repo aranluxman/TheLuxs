@@ -3,6 +3,7 @@
 import { isSupabaseConfigured } from "@/lib/supabase";
 import { FamilyProvider, useFamily } from "./FamilyProvider";
 import { ProfileGate } from "./ProfileGate";
+import { ThemeProvider } from "./ThemeProvider";
 import { SetupScreen } from "./SetupScreen";
 import { Shell } from "./Shell";
 
@@ -51,10 +52,17 @@ function Gate() {
 }
 
 export function App() {
-  if (!isSupabaseConfigured) return <MissingConfig />;
+  // The theme wraps even the misconfigured state — a white flash on a dark
+  // tablet is the first thing anyone would notice, error page or not.
   return (
-    <FamilyProvider>
-      <Gate />
-    </FamilyProvider>
+    <ThemeProvider>
+      {isSupabaseConfigured ? (
+        <FamilyProvider>
+          <Gate />
+        </FamilyProvider>
+      ) : (
+        <MissingConfig />
+      )}
+    </ThemeProvider>
   );
 }

@@ -1,7 +1,7 @@
 # Family Dashboard
 
-Chores, events, a shared calendar and a group chat for a five-person household —
-one page, four tabs, live on every device in the house.
+Events, a shared calendar and a group chat for a five-person household —
+one page, three tabs, live on every device in the house.
 
 Built with **Next.js 16 (App Router, TypeScript)**, **Tailwind CSS v4**,
 **Supabase** (Postgres + Realtime) and deployed as a **static site on Cloudflare Pages**.
@@ -12,48 +12,49 @@ Built with **Next.js 16 (App Router, TypeScript)**, **Tailwind CSS v4**,
 
 | Tab | What it does |
 | --- | --- |
-| **Chores** | Today's daily jobs and this week's deep clean, filtered to *Mine* or *Everyone*. Tick a box and it lands on every other device instantly. A "Coming up" strip shows the next six days of the rotation. |
+| **Calendar** | An agenda of what is actually coming up, over the next 2 weeks, 4 weeks or 3 months. Posted events and everyone's schedule entries merge into one chronological list, grouped by day. Tabs across the top switch between *Everyone* and one person, so anyone can pull up just their own week. |
 | **Events** | The family activity board — movie night, the CNE, a trip downtown. Title, date/time, location, notes, and a per-person RSVP checklist (Going / Maybe / Can't). |
-| **Calendar** | One grid that overlays *everything*: posted events, each person's schedule entries, and chore deadlines. Month and week views, colour-coded per member, with the legend doubling as a filter. |
-| **Chat** | An iMessage-style group thread — grouped bubbles, day separators, timestamps, sender colours, and live delivery over Supabase Realtime. Photos, files and voice notes attach to messages; anyone can delete a message. |
+| **Chat** | An iMessage-style group thread — grouped bubbles, day separators, timestamps, sender colours, and live delivery over Supabase Realtime. Photos, files and voice notes attach to messages; tap any message to react with 👍 ❤️ 😂; you can delete your own. |
 
-Every screen also carries a **profile photo** per person, and the Chores tab
+Every screen also carries a **profile photo** per person, and the Calendar tab
 opens with a quote of the day, the next thing on the family's calendar, and
 what each person says they're looking forward to.
+
+The whole app has a **light and dark theme** with a manual toggle in the header
+(the 🌙/☀️ button). The choice persists per device; shift-clicking the toggle
+hands control back to the operating system.
 
 There is no login. You pick your face once and the device remembers you — see
 [Security model](#security-model) for what that means and how to tighten it.
 
 ---
 
-## How the chore rotation works
+## Theming
 
-This is the one piece worth understanding before you change anything.
+Every colour in the app resolves through a CSS variable declared in
+`globals.css` — `bg-surface` is `var(--color-surface)`, and so on. Dark mode
+redefines those variables under `:root[data-theme="dark"]`; no component
+carries a `dark:` override for colour.
 
-Chores live in **two** tables:
+Three states, not two:
 
-- `family_chore_templates` — the *definition* ("Wash the dishes", daily).
-- `family_chores` — one *instance* per (chore, period), with an assignee, a due
-  date and a completion flag.
+| `data-theme` | Behaviour |
+| --- | --- |
+| absent | Follow the OS (`prefers-color-scheme`) |
+| `light` | Pinned light, even on a dark OS |
+| `dark` | Pinned dark, even on a light OS |
 
-Instances are materialised by `family_generate_chores(from_date, days)`. The
-assignment is a pure function of the period number:
+The choice lives in `localStorage` under `family-dashboard:theme`, and a small
+blocking script in `layout.tsx` applies it **before first paint** — without it
+the page renders light and snaps to dark on hydration, which is exactly the
+flash you notice on a kitchen tablet at night. `ThemeProvider` reads both the
+stored choice and the OS preference through `useSyncExternalStore`, so the
+`storage` event keeps two open tabs in step for free.
 
-```
-assignee = members[(period_index + template.rotation_offset) % member_count]
-```
-
-where `period_index` counts days (for daily chores) or ISO weeks (for weekly
-ones) from a fixed Monday. Two consequences fall out of that:
-
-- **It is idempotent.** `UNIQUE (template_id, period_key)` means re-running
-  never duplicates or reshuffles anything, so every device can safely call it on
-  load — the first one writes, the rest no-op.
-- **It is deterministic.** Every client computes the same roster, and history
-  never rewrites itself.
-
-`rotation_offset` staggers the starting person per chore, so nobody draws every
-job on day one. The app keeps four weeks materialised ahead of today.
+Two tokens exist purely to keep dark mode free of per-component patches:
+`--color-on-ink` (text sitting on an ink-filled button or your own chat bubble)
+and `--color-danger` / `--color-danger-soft` (destructive affordances, which
+would otherwise hardcode Tailwind's `red-50`/`red-800` and glare in the dark).
 
 ---
 
@@ -79,18 +80,37 @@ minutes, and plays back inline.
 messages and pages backwards through the whole history with *Load earlier
 messages*.
 
-**Deleting:** anyone can delete any message — it becomes a tombstone reading
-"Message deleted by …", and the attachment reference is cleared. Keeping the
-row means the conversation keeps its shape and the history stays complete.
-Note the storage object itself is left in the bucket; see *Housekeeping* below.
+**Deleting:** you can delete **your own** messages, and it deletes for
+everyone. A confirmation prompt comes first, because there is no undo. The row
+survives as a tombstone reading "Message deleted by …" so the conversation
+keeps its shape, but the text, every attachment column *and the storage object
+itself* are removed — a soft delete that left the photo in the bucket was not
+really a delete, since anyone still holding a signed URL kept working access
+to it.
 
-### Who does which chore
+Ownership is enforced in the query, not in the component: the update carries
+`.eq("sender_id", me)`, so a stale UI matches no row and changes nothing. Note
+that this is a *correctness* guard, not a *security* one — see
+[Security model](#security-model).
 
-**Chores → Who does what** lets you excuse anyone from a specific job. The
-rotation then skips them entirely, and the remaining people share it evenly —
-it does not simply leave a gap on their turn. Changing this rewrites only the
-chores nobody has ticked off yet; completed ones are the household's record and
-are never touched.
+### Reactions
+
+Tap any message to open a picker with a fixed palette: 👍 ❤️ 😂. Tapping the
+same emoji again removes yours. Each tally under a bubble shows the faces of
+who reacted, which beats a bare count in a five-person house — you can see
+whether the person you care about laughed.
+
+Reactions live in `family_message_reactions`, keyed
+`(message_id, member_id, emoji)`. That composite primary key is the whole
+design: one person can both heart *and* laugh at a message, toggling one does
+not disturb the other, and two devices tapping at once collapse into the same
+row instead of colliding. The palette is closed by a `CHECK` constraint as
+well as by the `REACTION_EMOJI` constant, so widening it means changing both.
+
+Toggles are optimistic and roll back if the write fails. Realtime carries the
+change to every other device; the table has `REPLICA IDENTITY FULL` so a
+`DELETE` payload arrives with enough of the old row to know which pill to
+remove.
 
 ### Combining everyone's calendars
 
@@ -99,7 +119,8 @@ one grid, colour-coded by whose it is. Two ways in:
 
 - **A live link** — Google Calendar → *Settings* → *Integrate calendar* →
   *Secret address in iCal format*. Apple and Outlook publish a similar URL.
-  `webcal://` works. These re-sync on demand via *Sync*.
+  `webcal://` works. These re-sync on their own — see below — and on demand
+  via *Sync*.
 - **A pasted `.ics` file** — a one-off import that doesn't refresh by itself.
 
 Fetching and parsing happen in the `family-sync-ical` Edge Function, not the
@@ -108,6 +129,14 @@ a browser can't read those URLs; and expanding a repeating event needs a real
 RRULE implementation (it uses `ical.js`). Occurrences are expanded across a
 window of 30 days back to 12 months ahead, and each sync replaces that window
 wholesale so upstream cancellations disappear too.
+
+**Automatic refresh.** With the Calendar tab open, `useCalendarAutoSync` pulls
+every active feed once on mount, then every 30 minutes, and again whenever the
+tab returns to the foreground after 15 minutes away. Because each sync replaces
+a feed's whole window rather than diffing it, a redundant run is harmless —
+which is what makes it safe for several devices in the house to poll
+independently. A run that fails leaves the previously imported entries in
+place, so the calendar degrades to *slightly stale* rather than to empty.
 
 Imported entries are read-only in the app — deleting one locally would just
 bring it back on the next sync. Remove the feed instead, which takes its events
@@ -121,13 +150,16 @@ npx supabase functions deploy family-sync-ical --project-ref <your-ref>
 
 ### Housekeeping
 
-Two things are deliberately left for you rather than automated:
+Storage now cleans up after itself: deleting a message removes its object from
+the bucket, and a message whose upload succeeded but whose row insert failed
+has its orphan removed too.
 
-- Deleting a message clears its attachment reference but leaves the file in the
-  bucket. A scheduled job could sweep orphans; for a five-person household it's
-  cheaper to ignore.
-- Feed syncs are manual. If you want them automatic, `pg_cron` plus `pg_net`
-  (already installed) can POST to the Edge Function on a schedule.
+One thing is still worth knowing:
+
+- Feed syncs are driven by an open browser. If nobody opens the dashboard for a
+  week the calendar goes stale until someone does. If you want them to run
+  regardless, `pg_cron` plus `pg_net` (already installed) can POST to the Edge
+  Function on a schedule.
 
 ## Setup
 
@@ -136,29 +168,36 @@ Two things are deliberately left for you rather than automated:
 Open the [Supabase SQL Editor](https://supabase.com/dashboard/project/_/sql) and
 run [`supabase/migrations/0001_family_dashboard.sql`](supabase/migrations/0001_family_dashboard.sql).
 
-Then run `supabase/migrations/0002_media_quotes_ical.sql`, which adds profile
-photos, chat attachments, chore exclusions, quotes and calendar feeds.
+Then run, in order:
 
-Both are idempotent — safe to re-run. Together they create:
+- `supabase/migrations/0002_media_quotes_ical.sql` — profile photos, chat
+  attachments, quotes and calendar feeds.
+- `supabase/migrations/0003_reactions_and_chores_removal.sql` — message
+  reactions, the missing indexes, and the removal of the chores feature.
 
-- `family_members`, `family_chore_templates`, `family_chores`,
-  `family_events`, `family_event_rsvps`, `family_calendar_entries`,
-  `family_messages`
-- the `family_generate_chores()` rotation engine and `family_set_chore_done()`
-- RLS policies on all seven tables
-- Realtime on `family_messages` and `family_chores`
-- six starter chores (counters, dishes, putting away dishes, trash, vacuuming, mopping)
-- `family_chore_exclusions`, `family_quotes`, `family_looking_forward`,
-  `family_calendar_feeds`
+All three are idempotent — safe to re-run. Together they leave you with:
+
+- `family_members`, `family_events`, `family_event_rsvps`,
+  `family_calendar_entries`, `family_messages`, `family_message_reactions`,
+  `family_quotes`, `family_looking_forward`, `family_calendar_feeds`
+- RLS policies on all nine tables
+- Realtime on `family_messages` and `family_message_reactions`
 - the private `family-media` storage bucket and its policy
 - 28 seeded quotes
+
+> **Upgrading an existing install.** `0003` **drops** `family_chores`,
+> `family_chore_templates`, `family_chore_exclusions`, the
+> `family_generate_chores()` / `family_regenerate_future_chores()` /
+> `family_set_chore_done()` functions and the `family_recurrence` enum. That
+> deletes your chore history for good. Take a backup first if you want to keep
+> the record of who did what.
 
 > **Table naming.** Every object is prefixed `family_` because this Supabase
 > project is shared with other apps that follow the same convention
 > (`life_flow_*`, `myday_*`, `alux_*`). Nothing here touches those tables.
 
 No family members are seeded — the app's first-run screen creates them, which is
-also what establishes the rotation order.
+also what establishes the order they appear in every picker and filter.
 
 ### 2. Environment variables
 
@@ -265,13 +304,21 @@ you will forget when you add it later.
 
 The spec calls for profile *selection*, not login — so the browser only ever
 carries the Supabase **publishable** key, and the RLS policies grant the `anon`
-role read/write on the seven `family_*` tables.
+role read/write on the nine `family_*` tables.
 
 **In practice: anyone with the site URL and that key can read and write this
 family's data** — and that now includes family photos, uploaded files and voice
 recordings. The storage bucket is private and served through signed URLs, which
 stops the objects being enumerable, but it does not stop someone holding the key
 from asking for a signed URL themselves.
+
+It also bounds what "delete your own messages" can mean. The client sends
+`.eq("sender_id", me)`, and `me` is whichever profile the device picked — so
+the rule is honest about *accidents*, not about *adversaries*. Anyone holding
+the key can issue whatever update they like. Making that a real guarantee needs
+auth plus an RLS predicate such as
+`using (sender_id = auth.uid())` on `family_messages`, and the equivalent on
+`family_message_reactions`.
 
 That trade was fine for a chore list. With photos and voice notes in it, adding
 a login is the sensible next step, and doubly so if the site or the repository
@@ -307,31 +354,47 @@ src/
     SetupScreen.tsx       first-run: name the household
     ProfileGate.tsx       "Who's using this?"
     Shell.tsx             header, desktop tabs, mobile bottom bar
-    ChoresTab.tsx
+    ThemeProvider.tsx     light/dark/system preference, persisted
+    ThemeToggle.tsx       the 🌙/☀️ header button
+    CalendarTab.tsx       upcoming agenda + per-person tabs
     EventsTab.tsx
-    CalendarTab.tsx       aggregates events + entries + chore deadlines
-    ChatTab.tsx
+    ChatTab.tsx           bubbles, attachments, reactions, delete
+    CalendarFeeds.tsx     subscribe/import iCal feeds
+    TodayCard.tsx         quote + next event + "looking forward to"
     ui.tsx                Avatar, Button, Card, Modal, Field, EmptyState…
   hooks/
-    useChores.ts          range query + Realtime + optimistic toggle
-    useMessages.ts        history + Realtime inserts/deletes
+    useMessages.ts        history + Realtime + attachment lifecycle
+    useReactions.ts       reaction rows + Realtime + optimistic toggle
     useEvents.ts          events + RSVPs
     useCalendarEntries.ts
+    useCalendarFeeds.ts   feed CRUD + useCalendarAutoSync polling
   lib/
     supabase.ts           lazily-created client, config guard
-    types.ts              row types + the AgendaItem union
+    types.ts              row types, REACTION_EMOJI, the AgendaItem union
     dates.ts              local-time helpers (Monday-first, ISO weeks)
     palette.ts            member colours, categories, tint()
+    storage.ts            upload / sign / remove in the private bucket
 supabase/
-  migrations/0001_family_dashboard.sql
+  migrations/
+    0001_family_dashboard.sql
+    0002_media_quotes_ical.sql
+    0003_reactions_and_chores_removal.sql
+  functions/family-sync-ical/
 ```
 
 ### Notes on a couple of decisions
 
 - **Dates are handled in local time throughout.** `dayKey()` formats with
   `date-fns`, never `toISOString()`, which would shift the day for anyone west
-  of UTC and put chores on the wrong date.
-- **Chore toggles are optimistic** and roll back if the write fails. The
-  Realtime handler ignores rows outside the window currently on screen.
-- **Weeks start Monday** in the UI because the SQL rotation uses ISO weeks.
-  Change one and you must change the other.
+  of UTC and land an event on the wrong date.
+- **Signed URLs are re-signed on a timer.** They last 8 hours, and this thing
+  runs on a tablet nobody reloads, so `useMessages` re-signs every attachment
+  it is holding every 7 hours. Without that, images 403 partway through the
+  day.
+- **The calendar filter is single-select.** An earlier version toggled member
+  visibility with a multi-select legend; "show me *my* week" is the question
+  people actually ask, and one active tab answers it without any intermediate
+  state to reason about. An unclaimed *event* still shows on every tab, since
+  a family outing nobody has RSVP'd to is not nobody's business.
+- **Weeks start Monday** (`startOfWeekMon`, ISO weeks) wherever a week boundary
+  is needed.
