@@ -129,7 +129,7 @@ function AgendaRow({
   const color = owners[0]?.color ?? "#a8a29e";
 
   return (
-    <li className="group hover:bg-sunk/50 flex items-start gap-3 rounded-xl px-2 py-2.5 transition-colors">
+    <li className="group hover:bg-sunk/50 flex items-start gap-3 rounded-xl px-2 py-3 transition-[background-color,transform] hover:translate-x-px">
       {/* A colour bar reads faster than a dot at a glance across the kitchen. */}
       <span
         className="mt-0.5 w-1 shrink-0 self-stretch rounded-full"
@@ -281,15 +281,16 @@ export function CalendarTab() {
   const error = eventsError ?? entriesError;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-7">
       <ErrorNote message={error} />
 
       <TodayCard />
 
       {/* ----------------------------------------------------------- header */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold">
+          <p className="text-accent text-[11px] font-bold tracking-[0.14em] uppercase">Shared calendar</p>
+          <h2 className="mt-1 text-2xl font-bold tracking-tight">
             {activePerson ? `${activePerson.name}'s schedule` : "What's coming up"}
           </h2>
           <p className="text-faint mt-0.5 text-xs">
@@ -301,7 +302,7 @@ export function CalendarTab() {
         </div>
 
         <div className="flex items-center gap-2">
-          <div className="bg-sunk inline-flex rounded-xl p-1" role="group" aria-label="Range">
+          <div className="bg-sunk inline-flex rounded-xl p-1 shadow-inner" role="group" aria-label="Range">
             {RANGES.map((r) => (
               <button
                 key={r.id}
@@ -398,7 +399,7 @@ export function CalendarTab() {
               // on top of the first row instead of tracking the page.
               <section key={key}>
                 <div
-                  className={`bg-canvas/90 sticky top-14 z-10 flex items-baseline gap-2 px-2 py-2 backdrop-blur ${
+                  className={`bg-canvas/90 sticky top-14 z-10 flex items-baseline gap-2 px-2 py-2.5 backdrop-blur ${
                     today ? "text-accent" : ""
                   }`}
                 >

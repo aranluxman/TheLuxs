@@ -183,7 +183,7 @@ function ReactionPills({
             aria-label={`${s.emoji}, ${s.memberIds.length} ${
               s.memberIds.length === 1 ? "person" : "people"
             }${s.mine ? ", including you" : ""}. Toggle your reaction.`}
-            className={`inline-flex items-center gap-1 rounded-full border py-0.5 pr-1.5 pl-1.5 text-[11px] transition-colors ${
+            className={`reaction-pill inline-flex items-center gap-1 rounded-full border py-0.5 pr-1.5 pl-1.5 text-[11px] transition-[background-color,border-color,transform] ${
               s.mine
                 ? "border-accent bg-accent/12 text-ink font-semibold"
                 : "border-line bg-surface text-muted hover:bg-sunk"
@@ -224,7 +224,7 @@ function ReactionPicker({
   const mineFor = (emoji: ReactionEmoji) => summaries.some((s) => s.emoji === emoji && s.mine);
 
   return (
-    <div className="border-line bg-surface flex items-center gap-0.5 rounded-full border p-1 shadow-lg">
+    <div className="reaction-picker border-line bg-surface flex items-center gap-0.5 rounded-full border p-1 shadow-lg">
       {REACTION_EMOJI.map((emoji) => (
         <button
           key={emoji}
@@ -412,10 +412,14 @@ export function ChatTab() {
       <div
         ref={scrollRef}
         onScroll={onScroll}
-        className="scroll-area border-line bg-surface flex-1 overflow-y-auto rounded-3xl border px-3 py-4 sm:px-4"
+        className="chat-panel scroll-area border-line bg-surface flex-1 overflow-y-auto rounded-3xl border px-3 py-4 sm:px-5 sm:py-5"
       >
         {loading ? (
-          <p className="text-muted py-8 text-center text-sm">Loading messages…</p>
+          <div className="space-y-3 py-4" aria-label="Loading messages" role="status">
+            <span className="skeleton block h-12 w-3/4 rounded-2xl" />
+            <span className="skeleton ml-auto block h-10 w-1/2 rounded-2xl" />
+            <span className="skeleton block h-16 w-2/3 rounded-2xl" />
+          </div>
         ) : rows.length === 0 ? (
           <div className="text-muted flex h-full flex-col items-center justify-center gap-2 text-center">
             <span className="text-4xl" aria-hidden>
@@ -514,7 +518,7 @@ export function ChatTab() {
                               e.preventDefault();
                               setActiveId(isActive ? null : r.message.id);
                             }}
-                            className={`cursor-pointer space-y-1.5 px-3.5 py-2 text-sm break-words whitespace-pre-wrap shadow-sm transition-shadow hover:shadow-md ${
+                            className={`chat-bubble cursor-pointer space-y-1.5 px-3.5 py-2.5 text-sm break-words whitespace-pre-wrap shadow-sm transition-[box-shadow,transform] hover:-translate-y-px hover:shadow-md ${
                               r.mine ? "bg-ink text-on-ink" : "text-ink"
                             } ${isActive ? "ring-accent/45 ring-2" : ""}`}
                             style={{
@@ -574,7 +578,7 @@ export function ChatTab() {
 
       {/* ------------------------------------------------------- composer */}
       {recorder.recording ? (
-        <div className="border-line bg-surface mt-3 flex items-center gap-3 rounded-2xl border px-4 py-3">
+        <div className="chat-composer border-line bg-surface mt-3 flex items-center gap-3 rounded-2xl border px-4 py-3 shadow-sm">
           <span
             className="bg-danger h-2.5 w-2.5 animate-pulse rounded-full"
             aria-hidden
@@ -598,7 +602,7 @@ export function ChatTab() {
           </button>
         </div>
       ) : (
-        <form onSubmit={submitText} className="mt-3 flex items-end gap-2">
+        <form onSubmit={submitText} className="chat-composer mt-3 flex items-end gap-2">
           <input
             ref={fileInputRef}
             type="file"
@@ -635,7 +639,7 @@ export function ChatTab() {
               (currentMember ? `Message as ${currentMember.name}…` : "Pick a profile first")
             }
             disabled={!canSend}
-            className="border-line bg-surface text-ink placeholder:text-faint focus:border-ink max-h-32 min-h-[2.75rem] flex-1 resize-none rounded-2xl border px-4 py-3 text-sm focus:outline-none disabled:opacity-60"
+            className="border-line bg-surface text-ink placeholder:text-faint focus:border-accent focus:ring-accent/20 max-h-32 min-h-[2.75rem] flex-1 resize-none rounded-2xl border px-4 py-3 text-sm shadow-sm focus:outline-none focus:ring-4 disabled:opacity-60"
           />
 
           {draft.trim() ? (

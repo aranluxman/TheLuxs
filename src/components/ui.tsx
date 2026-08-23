@@ -88,12 +88,12 @@ type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
 
 export function Button({ variant = "primary", className = "", ...rest }: ButtonProps) {
   const base =
-    "inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium " +
-    "transition-colors disabled:cursor-not-allowed disabled:opacity-45 " +
+    "inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold " +
+    "transition-[background-color,border-color,color,transform,box-shadow] duration-200 disabled:cursor-not-allowed disabled:opacity-45 " +
     "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink";
   const variants = {
-    primary: "bg-ink text-on-ink hover:opacity-85",
-    ghost: "border border-line bg-surface text-ink hover:bg-sunk",
+    primary: "bg-ink text-on-ink shadow-sm hover:-translate-y-px hover:shadow-md",
+    ghost: "border border-line bg-surface text-ink shadow-sm hover:-translate-y-px hover:bg-sunk",
     danger: "text-danger hover:bg-danger-soft",
   };
   return <button className={`${base} ${variants[variant]} ${className}`} {...rest} />;
@@ -109,7 +109,7 @@ export function Card({
   children: React.ReactNode;
 }) {
   return (
-    <div className={`border-line bg-surface rounded-2xl border ${className}`}>{children}</div>
+    <div className={`dashboard-card border-line bg-surface rounded-2xl border ${className}`}>{children}</div>
   );
 }
 
@@ -122,7 +122,7 @@ export function SectionTitle({
 }) {
   return (
     <div className="mb-3 flex items-baseline justify-between gap-3">
-      <h2 className="text-muted text-xs font-semibold tracking-[0.08em] uppercase">
+      <h2 className="text-muted text-[11px] font-bold tracking-[0.12em] uppercase">
         {children}
       </h2>
       {action}
@@ -132,8 +132,8 @@ export function SectionTitle({
 
 export function EmptyState({ icon, title, hint }: { icon: string; title: string; hint?: string }) {
   return (
-    <div className="text-muted flex flex-col items-center gap-2 px-6 py-12 text-center">
-      <span className="text-3xl" aria-hidden>
+    <div className="text-muted flex flex-col items-center gap-3 px-6 py-14 text-center">
+      <span className="bg-accent/12 grid h-12 w-12 place-items-center rounded-2xl text-2xl" aria-hidden>
         {icon}
       </span>
       <p className="text-ink text-sm font-medium">{title}</p>
@@ -155,7 +155,7 @@ export function Field({
 }) {
   return (
     <label className="block">
-      <span className="text-muted mb-1.5 block text-xs font-semibold">{label}</span>
+      <span className="text-muted mb-1.5 block text-xs font-bold tracking-wide">{label}</span>
       {children}
       {hint ? <span className="text-faint mt-1 block text-xs">{hint}</span> : null}
     </label>
@@ -163,8 +163,8 @@ export function Field({
 }
 
 export const inputClass =
-  "w-full rounded-xl border border-line bg-surface px-3 py-2.5 text-sm text-ink " +
-  "placeholder:text-faint focus:border-ink focus:outline-none";
+  "w-full rounded-xl border border-line bg-surface px-3 py-3 text-sm text-ink shadow-sm " +
+  "placeholder:text-faint focus:border-accent focus:ring-accent/20 focus:outline-none focus:ring-4";
 
 /* ----------------------------------------------------------------- Modal */
 
@@ -201,7 +201,7 @@ export function Modal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/35 p-0 sm:items-center sm:p-4"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/45 p-0 backdrop-blur-[2px] sm:items-center sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-label={title}
@@ -211,13 +211,13 @@ export function Modal({
     >
       <div
         ref={panelRef}
-        className="bg-surface max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-3xl p-5 sm:rounded-3xl"
+        className="bg-surface max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-3xl p-5 shadow-2xl sm:rounded-3xl sm:p-6"
       >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold">{title}</h2>
           <button
             onClick={onClose}
-            className="text-muted hover:bg-sunk grid h-8 w-8 place-items-center rounded-full text-xl leading-none"
+            className="text-muted hover:bg-sunk grid h-10 w-10 place-items-center rounded-full text-xl leading-none"
             aria-label="Close"
           >
             ×

@@ -55,7 +55,7 @@ function EventCard({
 
   return (
     <Card className={`overflow-hidden ${past ? "opacity-60" : ""}`}>
-      <div className="flex gap-4 p-4">
+      <div className="flex gap-4 p-4 sm:p-5">
         <div
           className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl"
           style={{ backgroundColor: tint(creator?.color ?? "#b45309", 0.14) }}
@@ -69,7 +69,7 @@ function EventCard({
         </div>
 
         <div className="min-w-0 flex-1">
-          <h3 className="font-semibold">{event.title}</h3>
+          <h3 className="font-bold tracking-tight">{event.title}</h3>
           <p className="text-muted mt-0.5 text-sm">
             {formatDayLabel(when)} · {formatTime(when)}
             {event.location ? ` · ${event.location}` : ""}
@@ -92,7 +92,7 @@ function EventCard({
         </button>
       </div>
 
-      <div className="border-line bg-sunk/40 border-t px-4 py-3">
+      <div className="border-line bg-sunk/45 border-t px-4 py-3.5">
         <p className="text-muted mb-2 text-xs font-semibold">
           {goingCount > 0 ? `${goingCount} coming` : "Nobody has RSVP'd yet"}
         </p>
@@ -205,7 +205,8 @@ export function EventsTab() {
 
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold">Activity board</h2>
+          <p className="text-accent text-[11px] font-bold tracking-[0.14em] uppercase">Family plans</p>
+          <h2 className="mt-1 text-2xl font-bold tracking-tight">Activity board</h2>
           <p className="text-muted mt-0.5 text-sm">Plan something for the whole house.</p>
         </div>
         <Button onClick={() => setOpen(true)}>+ New</Button>
@@ -222,7 +223,7 @@ export function EventsTab() {
             <EmptyState
               icon="🎡"
               title="Nothing planned yet"
-              hint="Movie night, a trip downtown, the CNE — put it on the board and let everyone RSVP."
+              hint="Movie night, a trip downtown, or the CNE. Put it on the board and let everyone RSVP."
             />
           </Card>
         ) : (

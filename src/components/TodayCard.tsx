@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useDailyExtras } from "@/hooks/useDailyExtras";
 import { useEvents } from "@/hooks/useEvents";
-import { formatDayLabel, formatTime, parseISO } from "@/lib/dates";
+import { format, formatDayLabel, formatTime, parseISO } from "@/lib/dates";
 import { tint } from "@/lib/palette";
 import { useFamily } from "./FamilyProvider";
 import { Avatar, Card, inputClass } from "./ui";
@@ -60,21 +60,32 @@ export function TodayCard() {
   }
 
   return (
-    <Card className="overflow-hidden">
+    <Card className="today-card">
+      <div className="relative z-[1] flex items-end justify-between gap-4 px-5 pt-5 pb-4 sm:px-6">
+        <div>
+          <p className="text-accent text-[11px] font-bold tracking-[0.14em] uppercase">Today</p>
+          <h2 className="mt-1 text-2xl font-bold tracking-tight sm:text-3xl">
+            {format(new Date(), "EEEE, MMMM d")}
+          </h2>
+        </div>
+        <span className="bg-surface/70 text-muted hidden rounded-full px-3 py-1.5 text-xs font-semibold shadow-sm sm:inline-flex">
+          Your family at a glance
+        </span>
+      </div>
       {quoteOfTheDay ? (
-        <div className="border-line border-b px-5 py-4">
+        <div className="border-line relative z-[1] border-y px-5 py-4 sm:px-6">
           <p className="text-ink text-[15px] leading-relaxed font-medium text-balance">
             &ldquo;{quoteOfTheDay.quote_text}&rdquo;
           </p>
           {quoteOfTheDay.author ? (
-            <p className="text-faint mt-1.5 text-xs">— {quoteOfTheDay.author}</p>
+            <p className="text-faint mt-1.5 text-xs">- {quoteOfTheDay.author}</p>
           ) : null}
         </div>
       ) : null}
 
-      <div className="grid gap-px sm:grid-cols-2">
+      <div className="relative z-[1] grid gap-px sm:grid-cols-2">
         {/* ------------------------------------------- next thing on the calendar */}
-        <div className="px-5 py-4">
+        <div className="px-5 py-5 sm:px-6">
           <h3 className="text-muted mb-2 text-xs font-semibold tracking-[0.08em] uppercase">
             To look forward to
           </h3>
@@ -91,13 +102,13 @@ export function TodayCard() {
             </div>
           ) : (
             <p className="text-faint text-xs">
-              Nothing on the board yet — plan something on the Events tab.
+              Nothing on the board yet. Plan something on the Events tab.
             </p>
           )}
         </div>
 
         {/* ---------------------------------------------- personal notes */}
-        <div className="border-line px-5 py-4 sm:border-l">
+        <div className="border-line px-5 py-5 sm:border-l sm:px-6">
           <h3 className="text-muted mb-2 text-xs font-semibold tracking-[0.08em] uppercase">
             What you&rsquo;re excited about
           </h3>
