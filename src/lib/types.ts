@@ -105,8 +105,14 @@ export interface CalendarFeed {
   id: string;
   member_id: string | null;
   name: string;
-  /** Empty string means a one-off pasted import rather than a live URL. */
-  url: string;
+  /**
+   * Whether this feed has a live URL, as opposed to a one-off pasted import.
+   *
+   * The URL itself is deliberately absent: it is a *secret* calendar address,
+   * and migration 0004 revokes SELECT on that column from the browser's role.
+   * A generated column answers the only question the UI ever asked of it.
+   */
+  has_url: boolean;
   is_active: boolean;
   last_synced_at: string | null;
   last_error: string | null;

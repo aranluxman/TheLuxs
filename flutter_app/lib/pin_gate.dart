@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:pinput/pinput.dart';
@@ -12,62 +14,269 @@ class PinSecurityConfig {
   static const inactivityTimeout = Duration(seconds: 60);
   static const maxFailedAttemptsBeforeCooldown = 5;
   static const maxCooldown = Duration(seconds: 30);
+
+  /// PBKDF2-HMAC-SHA256 work factor.
+  ///
+  /// A 4-digit PIN has only 10,000 candidates, so the KDF is what stands
+  /// between a Keystore/Keychain dump and the PIN. At 100k iterations an
+  /// offline sweep of the whole keyspace costs hours of compute per device
+  /// instead of the milliseconds a bare SHA-256 needed. It does not make a
+  /// 4-digit PIN strong — nothing can — it makes it expensive, and that plus
+  /// the on-device attempt limiter is the realistic defence. See the note on
+  /// [PinStore] for what would raise the ceiling further.
+  static const pbkdf2Iterations = 120000;
+
+  /// 16 bytes is the PBKDF2 floor in RFC 8018; 32 costs nothing extra here.
+  static const saltBytes = 32;
+  static const derivedKeyBytes = 32;
 }
+
+/// How the PIN is currently stored on this device.
+enum PinStorageState {
+  /// No PIN has been set — first run.
+  none,
+
+  /// A bare SHA-256 digest from before salting and PBKDF2 were introduced.
+  /// Verifiable, but must be re-derived under the new scheme once the owner
+  /// proves they know it.
+  legacyUnsalted,
+
+  /// Salted PBKDF2. Current.
+  current,
+}
+
+/* ------------------------------------------------------------------ PBKDF2 */
+
+/// Arguments for [_derivePbkdf2], which runs on a background isolate.
+@immutable
+class _Pbkdf2Request {
+  const _Pbkdf2Request({
+    required this.pin,
+    required this.salt,
+    required this.iterations,
+    required this.keyLength,
+  });
+
+  final String pin;
+  final Uint8List salt;
+  final int iterations;
+  final int keyLength;
+}
+
+/// PBKDF2-HMAC-SHA256, per RFC 8018 §5.2.
+///
+/// Top-level so it can be handed to [compute]. 120k iterations of pure-Dart
+/// HMAC takes long enough to stutter an animation, and the lock screen is
+/// exactly where a dropped frame is most visible.
+Uint8List _derivePbkdf2(_Pbkdf2Request request) {
+  const hashLength = 32; // SHA-256
+  final hmac = Hmac(sha256, utf8.encode(request.pin));
+  final blockCount = (request.keyLength / hashLength).ceil();
+  final output = Uint8List(blockCount * hashLength);
+
+  for (var block = 1; block <= blockCount; block++) {
+    // INT_32_BE(block), appended to the salt for the first HMAC of each block.
+    final seed = Uint8List(request.salt.length + 4)
+      ..setRange(0, request.salt.length, request.salt)
+      ..[request.salt.length] = (block >> 24) & 0xff
+      ..[request.salt.length + 1] = (block >> 16) & 0xff
+      ..[request.salt.length + 2] = (block >> 8) & 0xff
+      ..[request.salt.length + 3] = block & 0xff;
+
+    var u = Uint8List.fromList(hmac.convert(seed).bytes);
+    final accumulator = Uint8List.fromList(u);
+
+    for (var iteration = 1; iteration < request.iterations; iteration++) {
+      u = Uint8List.fromList(hmac.convert(u).bytes);
+      for (var i = 0; i < hashLength; i++) {
+        accumulator[i] ^= u[i];
+      }
+    }
+    output.setRange((block - 1) * hashLength, block * hashLength, accumulator);
+  }
+
+  return Uint8List.sublistView(output, 0, request.keyLength);
+}
+
+/// Length-independent comparison, so a wrong PIN cannot be narrowed down by
+/// timing how long the mismatch took to find.
+bool _constantTimeEquals(List<int> a, List<int> b) {
+  if (a.length != b.length) return false;
+  var difference = 0;
+  for (var i = 0; i < a.length; i++) {
+    difference |= a[i] ^ b[i];
+  }
+  return difference == 0;
+}
+
+/* --------------------------------------------------------------- PinStore */
 
 /// The current data model has one anonymous device session and no per-member
 /// PIN field. A single household PIN is therefore used for every profile.
 /// TODO(security): introduce a trusted per-member PIN verifier before switching
 /// to per-profile PINs; never read a member's PIN hash into the client.
+///
+/// TODO(security): a 4-digit PIN plus a KDF is a delay, not a wall. The next
+/// real step is to stop treating the PIN as the secret: generate a random key
+/// at enrolment, seal it behind the platform's biometric/credential prompt
+/// (`flutter_secure_storage` on iOS supports `accessibility` and access
+/// control; Android has `setUserAuthenticationRequired` on the Keystore key),
+/// and let the OS enforce rate limiting in hardware. That moves the attack
+/// from "10,000 guesses offline" to "defeat the secure enclave".
 class PinStore {
   PinStore({FlutterSecureStorage? storage})
       : _storage = storage ?? const FlutterSecureStorage();
 
-  static const _pinHashKey = 'family_tracker_pin_hash';
+  /// Salted PBKDF2 record. Current format.
+  static const _pinRecordKey = 'family_tracker_pin_record';
+
+  /// Bare, unsalted SHA-256 hex digest. Superseded.
+  static const _legacyHashKey = 'family_tracker_pin_hash';
+
+  /// Plaintext PIN. Superseded twice over.
   static const _legacyRawPinKey = 'family_tracker_pin';
+
   static final _pinPattern = RegExp(r'^\d{4}$');
+  static final _sha256HexPattern = RegExp(r'^[0-9a-f]{64}$');
+
+  /// `pbkdf2-sha256$<iterations>$<base64 salt>$<base64 key>`
+  static const _recordPrefix = 'pbkdf2-sha256';
 
   // flutter_secure_storage uses Keychain on iOS and encrypted Android storage
-  // backed by the Android Keystore. No shared_preferences dependency is used.
+  // backed by the Android Keystore. No shared_preferences dependency is used —
+  // a salt is not secret, but splitting the record across two stores would
+  // only add a way for them to disagree.
   final FlutterSecureStorage _storage;
 
-  Future<void> migrateLegacyPinIfNeeded() async {
-    final currentHash = await _storage.read(key: _pinHashKey);
-    if (currentHash != null) {
-      await _storage.delete(key: _legacyRawPinKey);
-      return;
-    }
+  final _random = math.Random.secure();
 
-    // One-time migration for the only legacy key this app has used. If an
-    // older build stored a PIN in shared_preferences, this code intentionally
-    // does not reintroduce that insecure dependency; this project contains no
-    // shared_preferences package or existing migration source to read.
-    final legacyRawPin = await _storage.read(key: _legacyRawPinKey);
-    if (legacyRawPin != null && _pinPattern.hasMatch(legacyRawPin)) {
-      await savePin(legacyRawPin);
-      await _storage.delete(key: _legacyRawPinKey);
+  Uint8List _newSalt() {
+    final salt = Uint8List(PinSecurityConfig.saltBytes);
+    for (var i = 0; i < salt.length; i++) {
+      salt[i] = _random.nextInt(256);
     }
+    return salt;
   }
 
-  Future<bool> hasPin() async {
-    await migrateLegacyPinIfNeeded();
-    return (await _storage.read(key: _pinHashKey)) != null;
+  /// Silently upgrades the one legacy format that can be upgraded without the
+  /// owner: a plaintext PIN, which is enough to re-derive from. The unsalted
+  /// digest cannot be — it needs the PIN itself, which is why it surfaces as
+  /// [PinStorageState.legacyUnsalted] instead.
+  Future<void> _migratePlaintextPinIfNeeded() async {
+    final rawPin = await _storage.read(key: _legacyRawPinKey);
+    if (rawPin == null) return;
+
+    if (_pinPattern.hasMatch(rawPin) &&
+        await _storage.read(key: _pinRecordKey) == null) {
+      await savePin(rawPin);
+    }
+    await _storage.delete(key: _legacyRawPinKey);
+  }
+
+  Future<PinStorageState> state() async {
+    await _migratePlaintextPinIfNeeded();
+
+    if (await _storage.read(key: _pinRecordKey) != null) {
+      return PinStorageState.current;
+    }
+    final legacy = await _storage.read(key: _legacyHashKey);
+    if (legacy != null && _sha256HexPattern.hasMatch(legacy)) {
+      return PinStorageState.legacyUnsalted;
+    }
+    // A legacy value that is neither a valid digest nor absent is corrupt;
+    // treating it as "no PIN" would silently unlock the app, so it is dropped
+    // and enrolment starts over.
+    if (legacy != null) await _storage.delete(key: _legacyHashKey);
+    return PinStorageState.none;
   }
 
   Future<void> savePin(String pin) async {
     if (!_pinPattern.hasMatch(pin)) {
       throw ArgumentError.value(pin, 'pin', 'PIN must contain exactly 4 digits.');
     }
-    await _storage.write(key: _pinHashKey, value: _hash(pin));
+
+    final salt = _newSalt();
+    final derived = await compute(
+      _derivePbkdf2,
+      _Pbkdf2Request(
+        pin: pin,
+        salt: salt,
+        iterations: PinSecurityConfig.pbkdf2Iterations,
+        keyLength: PinSecurityConfig.derivedKeyBytes,
+      ),
+    );
+
+    // The iteration count is stored per record rather than read from the
+    // constant, so raising the work factor later does not lock anyone out.
+    final record = [
+      _recordPrefix,
+      '${PinSecurityConfig.pbkdf2Iterations}',
+      base64.encode(salt),
+      base64.encode(derived),
+    ].join(r'$');
+
+    await _storage.write(key: _pinRecordKey, value: record);
+    // Only once the replacement is durably written.
+    await _storage.delete(key: _legacyHashKey);
+    await _storage.delete(key: _legacyRawPinKey);
   }
 
+  /// Verifies against whichever format is stored.
+  ///
+  /// A correct PIN checked against the legacy digest is re-saved under PBKDF2
+  /// on the spot — that is the whole upgrade, and it happens exactly once,
+  /// at the moment the owner proves they know the PIN.
   Future<bool> verify(String pin) async {
-    await migrateLegacyPinIfNeeded();
-    final savedHash = await _storage.read(key: _pinHashKey);
-    return savedHash != null && savedHash == _hash(pin);
+    if (!_pinPattern.hasMatch(pin)) return false;
+
+    final record = await _storage.read(key: _pinRecordKey);
+    if (record != null) return _verifyRecord(pin, record);
+
+    final legacy = await _storage.read(key: _legacyHashKey);
+    if (legacy == null) return false;
+
+    final matches = _constantTimeEquals(
+      utf8.encode(sha256.convert(utf8.encode(pin)).toString()),
+      utf8.encode(legacy),
+    );
+    if (matches) await savePin(pin);
+    return matches;
   }
 
-  String _hash(String pin) => sha256.convert(utf8.encode(pin)).toString();
+  Future<bool> _verifyRecord(String pin, String record) async {
+    final parts = record.split(r'$');
+    if (parts.length != 4 || parts[0] != _recordPrefix) return false;
+
+    final iterations = int.tryParse(parts[1]);
+    if (iterations == null || iterations <= 0) return false;
+
+    final Uint8List salt;
+    final Uint8List expected;
+    try {
+      salt = base64.decode(parts[2]);
+      expected = base64.decode(parts[3]);
+    } on FormatException {
+      return false;
+    }
+
+    final derived = await compute(
+      _derivePbkdf2,
+      _Pbkdf2Request(
+        pin: pin,
+        salt: salt,
+        iterations: iterations,
+        keyLength: expected.length,
+      ),
+    );
+    if (!_constantTimeEquals(derived, expected)) return false;
+
+    // Re-derive under the current work factor if this record predates a raise.
+    if (iterations < PinSecurityConfig.pbkdf2Iterations) await savePin(pin);
+    return true;
+  }
 }
+
+/* --------------------------------------------------------- attempt limiter */
 
 class _PinAttemptLimiter {
   static int _failedAttempts = 0;
@@ -98,6 +307,8 @@ class _PinAttemptLimiter {
     _lockedUntil = null;
   }
 }
+
+/* ------------------------------------------------------------------- gates */
 
 Future<bool> requireFamilyPin(
   BuildContext context, {
@@ -241,9 +452,17 @@ class _PinGateState extends State<PinGate>
 
   Timer? _cooldownTimer;
   bool _loading = true;
-  bool _settingUp = false;
+
+  /// True while PBKDF2 is running. It takes long enough to notice, so the
+  /// screen says so rather than appearing to have swallowed the entry.
+  bool _working = false;
+
+  PinStorageState _storageState = PinStorageState.none;
   String? _firstPin;
   String? _error;
+
+  bool get _settingUp => _storageState == PinStorageState.none;
+  bool get _upgrading => _storageState == PinStorageState.legacyUnsalted;
 
   @override
   void initState() {
@@ -252,11 +471,11 @@ class _PinGateState extends State<PinGate>
   }
 
   Future<void> _loadPinState() async {
-    final hasPin = await _pinStore.hasPin();
+    final state = await _pinStore.state();
     if (!mounted) return;
     setState(() {
       _loading = false;
-      _settingUp = !hasPin;
+      _storageState = state;
     });
     _startCooldownTicker();
   }
@@ -265,6 +484,7 @@ class _PinGateState extends State<PinGate>
     final remaining = _PinAttemptLimiter.remaining;
     if (remaining != null) {
       _setCooldownError(remaining);
+      _pinController.clear();
       return;
     }
 
@@ -280,12 +500,17 @@ class _PinGateState extends State<PinGate>
         _pinController.clear();
         return;
       }
-      await _pinStore.savePin(pin);
+      await _runWork(() => _pinStore.savePin(pin));
       await _complete();
       return;
     }
 
-    if (await _pinStore.verify(pin)) {
+    // Covers both a normal unlock and the one-time upgrade: `verify` re-saves
+    // a correct PIN under PBKDF2 when it finds the legacy digest.
+    final ok = await _runWork(() => _pinStore.verify(pin));
+    if (!mounted) return;
+
+    if (ok == true) {
       _PinAttemptLimiter.reset();
       await _complete();
     } else {
@@ -293,6 +518,16 @@ class _PinGateState extends State<PinGate>
       _showError('Incorrect PIN. Try again.');
       _pinController.clear();
       _startCooldownTicker();
+    }
+  }
+
+  /// Runs a KDF-bound operation with the progress state set.
+  Future<T?> _runWork<T>(Future<T> Function() action) async {
+    if (mounted) setState(() => _working = true);
+    try {
+      return await action();
+    } finally {
+      if (mounted) setState(() => _working = false);
     }
   }
 
@@ -327,7 +562,10 @@ class _PinGateState extends State<PinGate>
   }
 
   void _setCooldownError(Duration remaining) {
-    final seconds = math.max(1, remaining.inSeconds + (remaining.inMilliseconds % 1000 == 0 ? 0 : 1));
+    final seconds = math.max(
+      1,
+      remaining.inSeconds + (remaining.inMilliseconds % 1000 == 0 ? 0 : 1),
+    );
     if (mounted) setState(() => _error = 'Too many attempts. Try again in ${seconds}s.');
   }
 
@@ -343,6 +581,26 @@ class _PinGateState extends State<PinGate>
     _pinController.dispose();
     _shakeController.dispose();
     super.dispose();
+  }
+
+  String get _headline {
+    if (_settingUp) {
+      return _firstPin == null ? 'Create your 4-digit PIN' : 'Confirm your PIN';
+    }
+    if (_upgrading) return 'Security upgrade';
+    return widget.title;
+  }
+
+  String get _subhead {
+    if (_settingUp) {
+      return 'This PIN is stored only in device secure storage, salted and '
+          'stretched so a stolen device cannot reverse it.';
+    }
+    if (_upgrading) {
+      return 'We have improved how your PIN is protected. Enter your existing '
+          'PIN once and it will be re-saved under the stronger scheme.';
+    }
+    return 'Enter your PIN to view private family information.';
   }
 
   @override
@@ -391,14 +649,15 @@ class _PinGateState extends State<PinGate>
                             ),
                           ),
                         const SizedBox(height: 26),
-                        const Icon(Icons.lock_rounded, size: 42),
+                        Icon(
+                          _upgrading
+                              ? Icons.shield_moon_rounded
+                              : Icons.lock_rounded,
+                          size: 42,
+                        ),
                         const SizedBox(height: 14),
                         Text(
-                          _settingUp
-                              ? (_firstPin == null
-                                  ? 'Create your 4-digit PIN'
-                                  : 'Confirm your PIN')
-                              : widget.title,
+                          _headline,
                           style: theme.textTheme.headlineSmall?.copyWith(
                             fontWeight: FontWeight.w700,
                           ),
@@ -406,13 +665,11 @@ class _PinGateState extends State<PinGate>
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          _settingUp
-                              ? 'This PIN is stored only in device secure storage.'
-                              : 'Enter your PIN to view private family information.',
+                          _subhead,
                           textAlign: TextAlign.center,
                           style: theme.textTheme.bodyMedium?.copyWith(
-                                color: Colors.white60,
-                              ),
+                            color: Colors.white60,
+                          ),
                         ),
                         const SizedBox(height: 26),
                         AnimatedBuilder(
@@ -435,6 +692,7 @@ class _PinGateState extends State<PinGate>
                             obscureText: true,
                             obscuringWidget: const Icon(Icons.circle, size: 10),
                             keyboardType: TextInputType.number,
+                            enabled: !_working,
                             defaultPinTheme: pinTheme,
                             focusedPinTheme: PinTheme(
                               width: 58,
@@ -469,10 +727,40 @@ class _PinGateState extends State<PinGate>
                             onCompleted: _submit,
                           ),
                         ),
+                        // Deriving the key takes a beat. Say so, or the screen
+                        // looks like it ignored the fourth digit.
+                        SizedBox(
+                          height: 34,
+                          child: _working
+                              ? Padding(
+                                  padding: const EdgeInsets.only(top: 14),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      const SizedBox(
+                                        width: 14,
+                                        height: 14,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Text(
+                                        'Checking…',
+                                        style: theme.textTheme.bodySmall
+                                            ?.copyWith(color: Colors.white60),
+                                      ),
+                                    ],
+                                  ),
+                                )
+                              : null,
+                        ),
                         if (widget.canCancel) ...[
-                          const SizedBox(height: 22),
+                          const SizedBox(height: 8),
                           TextButton(
-                            onPressed: () => Navigator.of(context).pop(false),
+                            onPressed: _working
+                                ? null
+                                : () => Navigator.of(context).pop(false),
                             child: const Text('Cancel'),
                           ),
                         ],

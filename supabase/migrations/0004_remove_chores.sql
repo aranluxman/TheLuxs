@@ -15,8 +15,12 @@
 -- Dropped in dependency order. `family_chores` references the templates, and
 -- both reference the recurrence enum, so the enum goes last. Nothing outside
 -- the chores feature ever used any of it.
+-- Functions first, and `family_set_chore_done` specifically before the tables:
+-- it is declared `returns public.family_chores`, so it holds a dependency on
+-- the table's composite type and the DROP TABLE below fails while it exists.
 drop function if exists public.family_regenerate_future_chores(date, integer);
 drop function if exists public.family_generate_chores(date, integer);
+drop function if exists public.family_set_chore_done(uuid, boolean, uuid);
 
 -- Drop from the realtime publication first — dropping a published table while
 -- it is still a member leaves the publication in an awkward state on older
