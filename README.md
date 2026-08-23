@@ -24,8 +24,15 @@ The whole app has a **light and dark theme** with a manual toggle in the header
 (the 🌙/☀️ button). The choice persists per device; shift-clicking the toggle
 hands control back to the operating system.
 
-There is no login. You pick your face once and the device remembers you — see
-[Security model](#security-model) for what that means and how to tighten it.
+You pick your face and enter your **PIN**; the device remembers you afterwards,
+so it is asked for once per phone rather than every visit. Someone else's phone
+asks for it again.
+
+The PIN is bcrypt-hashed in a table the browser cannot read, checked by a
+server-side function, and throttled after five wrong tries. It stops a sibling
+opening the app as you. It is **not** a login — see
+[Security model](#security-model) for what still gets through and how to close
+it.
 
 ---
 
