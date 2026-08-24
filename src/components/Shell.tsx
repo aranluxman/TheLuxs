@@ -5,6 +5,7 @@ import { useFamily } from "./FamilyProvider";
 import { EventsTab } from "./EventsTab";
 import { CalendarTab } from "./CalendarTab";
 import { ChatTab } from "./ChatTab";
+import { ShoppingTab } from "./ShoppingTab";
 import { ProfileSheet } from "./ProfileSheet";
 import { ThemeToggle } from "./ThemeToggle";
 import { Avatar } from "./ui";
@@ -12,6 +13,7 @@ import { Avatar } from "./ui";
 const TABS = [
   { id: "calendar", label: "Calendar", icon: "🗓️" },
   { id: "events", label: "Events", icon: "🎟️" },
+  { id: "shopping", label: "Shopping", icon: "🛒" },
   { id: "chat", label: "Chat", icon: "💬" },
 ] as const;
 
@@ -37,8 +39,11 @@ export function Shell() {
             </div>
           </div>
 
-          {/* Tabs live in the header on desktop, in a bottom bar on phones. */}
-          <nav className="mx-auto hidden gap-1 sm:flex" aria-label="Sections">
+          {/* Tabs live in the header on desktop, in a bottom bar everywhere
+              else. Four labelled tabs plus the brand and the profile controls
+              do not fit one row until ~1024px, and a bottom bar is the native
+              pattern on a tablet anyway — so the switch happens at `lg`. */}
+          <nav className="mx-auto hidden gap-1 lg:flex" aria-label="Sections">
             {TABS.map((t) => (
               <button
                 key={t.id}
@@ -84,14 +89,15 @@ export function Shell() {
         </div>
       </header>
 
-      <main className="dashboard-main mx-auto w-full max-w-5xl flex-1 px-4 pt-5 pb-24 sm:pb-8">
+      <main className="dashboard-main mx-auto w-full max-w-5xl flex-1 px-4 pt-5 pb-24 lg:pb-8">
         {tab === "calendar" ? <CalendarTab /> : null}
         {tab === "events" ? <EventsTab /> : null}
+        {tab === "shopping" ? <ShoppingTab /> : null}
         {tab === "chat" ? <ChatTab /> : null}
       </main>
 
       <nav
-        className="mobile-nav border-line bg-surface/95 fixed inset-x-0 bottom-0 z-30 grid grid-cols-3 border-t pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden"
+        className="mobile-nav border-line bg-surface/95 fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden"
         aria-label="Sections"
       >
         {TABS.map((t) => (
@@ -99,7 +105,7 @@ export function Shell() {
             key={t.id}
             onClick={() => setTab(t.id)}
             aria-current={tab === t.id ? "page" : undefined}
-            className={`relative flex min-h-14 flex-col items-center justify-center gap-0.5 py-2.5 text-[11px] font-semibold transition-colors ${
+            className={`relative flex min-h-14 flex-col items-center justify-center gap-0.5 px-1 py-2.5 text-[10.5px] font-semibold transition-colors ${
               tab === t.id ? "text-ink" : "text-faint"
             }`}
           >

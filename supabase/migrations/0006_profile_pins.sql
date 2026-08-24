@@ -35,7 +35,14 @@
 -- ============================================================================
 
 -- pgcrypto is already installed by 0001; named here because this file depends
--- on crypt() and gen_salt() rather than merely inheriting them.
+-- on crypt(), gen_salt() and digest() rather than merely inheriting them.
+--
+-- Every function below carries `search_path = public, extensions`. On a hosted
+-- Supabase project pgcrypto lives in the `extensions` schema, not `public`, so
+-- a security-definer function pinned to `public` alone cannot see crypt() at
+-- all and fails at runtime with "function digest(text, unknown) does not
+-- exist". A schema that is absent from a search_path is ignored rather than an
+-- error, so naming both works on a plain Postgres too.
 create extension if not exists "pgcrypto";
 
 -- ---------------------------------------------------------------------------
@@ -100,7 +107,7 @@ create or replace function public.family_pin_status()
 returns table (member_id uuid, has_pin boolean, locked boolean)
 language sql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
   select m.id,
          p.member_id is not null,
@@ -124,7 +131,7 @@ create or replace function public.family_set_pin(
 returns jsonb
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 declare
   v_existing text;
@@ -168,7 +175,7 @@ create or replace function public.family_device_trusted(
 returns boolean
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 declare
   v_hash text;
@@ -204,7 +211,7 @@ create or replace function public.family_unlock_profile(
 returns jsonb
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 declare
   v_row public.family_member_pins%rowtype;
@@ -265,7 +272,7 @@ create or replace function public.family_forget_device(
 returns void
 language sql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
   delete from public.family_trusted_devices
    where member_id = p_member_id
@@ -279,7 +286,7 @@ create or replace function public.family_forget_all_devices(
 returns jsonb
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 declare
   v_hash text;
@@ -304,7 +311,7 @@ create or replace function public.family_admin_clear_pin(p_member_id uuid)
 returns void
 language sql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
   delete from public.family_member_pins     where member_id = p_member_id;
   delete from public.family_trusted_devices where member_id = p_member_id;
