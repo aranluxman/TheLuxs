@@ -101,15 +101,24 @@ export function Button({ variant = "primary", className = "", ...rest }: ButtonP
 
 /* ------------------------------------------------------------------ Card */
 
+/**
+ * Passes the rest of its props through to the div, which is what lets a caller
+ * set `style` (the chore board drives its left-edge colour through a custom
+ * property) or a `data-*` attribute the stylesheet keys on, without every such
+ * case needing a new named prop here.
+ */
 export function Card({
   className = "",
   children,
-}: {
-  className?: string;
-  children: React.ReactNode;
-}) {
+  ...rest
+}: React.HTMLAttributes<HTMLDivElement>) {
   return (
-    <div className={`dashboard-card border-line bg-surface rounded-2xl border ${className}`}>{children}</div>
+    <div
+      className={`dashboard-card border-line bg-surface rounded-xl border ${className}`}
+      {...rest}
+    >
+      {children}
+    </div>
   );
 }
 

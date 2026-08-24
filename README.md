@@ -1,7 +1,8 @@
 # Family Dashboard
 
-Events, a shared calendar and a group chat for a five-person household —
-one page, three tabs, live on every device in the house.
+A shared calendar, a chore board, a shopping list, a photo wall and a group
+chat for a five-person household — one page, five tabs, live on every device
+in the house.
 
 Built with **Next.js 16 (App Router, TypeScript)**, **Tailwind CSS v4**,
 **Supabase** (Postgres + Realtime) and deployed as a **static site on Cloudflare Pages**.
@@ -12,7 +13,8 @@ Built with **Next.js 16 (App Router, TypeScript)**, **Tailwind CSS v4**,
 
 | Tab | What it does |
 | --- | --- |
-| **Calendar** | An agenda of what is actually coming up, over the next 2 weeks, 4 weeks or 3 months. Posted events and everyone's schedule entries merge into one chronological list, grouped by day. Tabs across the top switch between *Everyone* and one person, so anyone can pull up just their own week. |
+| **Calendar** | An agenda of what is actually coming up, over the next 2 weeks, 4 weeks or 3 months. Posted events and everyone's schedule entries merge into one chronological list, grouped by day. Tabs across the top switch between *Everyone* and one person, so anyone can pull up just their own week. Below the agenda sits the **photo wall**. |
+| **Chores** | The house rota, grouped by how often each job comes round — every day, once a week on the weekend, and the shared jobs. One tap marks a chore done; it records who did it and when, and resets itself at midnight (daily) or on Monday morning (weekly). |
 | **Events** | The family activity board — movie night, the CNE, a trip downtown. Title, date/time, location, notes, and a per-person RSVP checklist (Going / Maybe / Can't). |
 | **Chat** | An iMessage-style group thread — grouped bubbles, day separators, timestamps, sender colours, and live delivery over Supabase Realtime. Photos, files and voice notes attach to messages; tap any message to react with 👍 ❤️ 😂; you can delete your own. |
 
@@ -20,9 +22,9 @@ Every screen also carries a **profile photo** per person, and the Calendar tab
 opens with a quote of the day, the next thing on the family's calendar, and
 what each person says they're looking forward to.
 
-The whole app has a **light and dark theme** with a manual toggle in the header
-(the 🌙/☀️ button). The choice persists per device; shift-clicking the toggle
-hands control back to the operating system.
+The whole app ships **four themes** — Clean Light, Midnight Dark, Emerald
+Luxury and Navy Luxury — picked from the swatch button in the header, plus a
+*Match system* option. The choice persists per device.
 
 You pick your face and enter your **PIN**; the device remembers you afterwards,
 so it is asked for once per phone rather than every visit. Someone else's phone
@@ -39,29 +41,45 @@ it.
 ## Theming
 
 Every colour in the app resolves through a CSS variable declared in
-`globals.css` — `bg-surface` is `var(--color-surface)`, and so on. Dark mode
-redefines those variables under `:root[data-theme="dark"]`; no component
-carries a `dark:` override for colour.
+`globals.css` — `bg-surface` is `var(--color-surface)`, and so on. A theme is a
+block that redefines those variables; no component carries a `dark:` override
+for colour, and adding a fifth palette is one CSS block plus one entry in
+`src/lib/themes.ts`.
 
-Three states, not two:
-
-| `data-theme` | Behaviour |
+| Theme | Reads as |
 | --- | --- |
-| absent | Follow the OS (`prefers-color-scheme`) |
-| `light` | Pinned light, even on a dark OS |
-| `dark` | Pinned dark, even on a light OS |
+| **Clean Light** | Soft white, near-black type, hairline grey borders, deep bronze accent |
+| **Midnight Dark** | Deep charcoal with an antique-gold accent |
+| **Emerald Luxury** | Dark forest green with a jade highlight |
+| **Navy Luxury** | Midnight navy with a cool steel-blue accent |
 
-The choice lives in `localStorage` under `family-dashboard:theme`, and a small
-blocking script in `layout.tsx` applies it **before first paint** — without it
-the page renders light and snaps to dark on hydration, which is exactly the
-flash you notice on a kitchen tablet at night. `ThemeProvider` reads both the
-stored choice and the OS preference through `useSyncExternalStore`, so the
-`storage` event keeps two open tabs in step for free.
+Two attributes drive it, both stamped on `<html>`:
 
-Two tokens exist purely to keep dark mode free of per-component patches:
-`--color-on-ink` (text sitting on an ink-filled button or your own chat bubble)
-and `--color-danger` / `--color-danger-soft` (destructive affordances, which
-would otherwise hardcode Tailwind's `red-50`/`red-800` and glare in the dark).
+| Attribute | Values | What reads it |
+| --- | --- | --- |
+| `data-theme` | `light` `midnight` `emerald` `navy` | The palette blocks in `globals.css` |
+| `data-mode` | `light` `dark` | `color-scheme`, and the `dark:` variant |
+
+`data-mode` is redundant with the theme id and deliberately so: native widgets
+and the `dark:` variant both need to know whether a palette is dark *without*
+enumerating which ids are, so a new theme never has to be added to a list.
+
+The choice lives in `localStorage` under `family-dashboard:theme`; removing the
+key means "follow the OS", which resolves to Clean Light or Midnight. A small
+blocking script in `layout.tsx` resolves all of that and stamps both attributes
+**before first paint** — without it the page renders light and snaps to dark on
+hydration, which is exactly the flash you notice on a kitchen tablet at night.
+Resolving `prefers-color-scheme` there rather than in CSS is what keeps
+`globals.css` to one block per palette instead of one per palette per scheme.
+`ThemeProvider` reads both the stored choice and the OS preference through
+`useSyncExternalStore`, so the `storage` event keeps two open tabs in step for
+free.
+
+Two tokens exist purely to keep the dark palettes free of per-component
+patches: `--color-on-ink` (text sitting on an ink-filled button or your own
+chat bubble) and `--color-danger` / `--color-danger-soft` (destructive
+affordances, which would otherwise hardcode Tailwind's `red-50`/`red-800` and
+glare in the dark).
 
 ---
 
@@ -155,6 +173,51 @@ To deploy the function after changing it:
 npx supabase functions deploy family-sync-ical --project-ref <your-ref>
 ```
 
+### The chore board
+
+The roster lives in code, in [`src/lib/chores.ts`](src/lib/chores.ts) — who has
+what, how often, and whether the job rotates between people. It changes about
+once a year and by conversation, so a table and an admin screen would be more
+machinery than the problem deserves.
+
+What the database holds is the *tick*: one row per (chore, period) saying it
+got done and who did it. There is nothing to generate ahead of time, nothing to
+backfill when the roster changes, and no period a chore can be missing from —
+an absent row is simply "not done yet".
+
+`period_key` is a local day (`2026-08-24`) for a daily chore and an ISO week
+(`2026-W35`) for a weekly one, which is what makes the board reset itself at
+midnight and on Monday morning without a scheduler. It is computed on the
+client, because the client is the only party that knows the household's
+timezone; a server-side `now()` would file a Sunday-evening sweep under Monday
+for anyone west of UTC.
+
+Anyone can untick anyone's chore. On a shared board the alternative is chasing
+whoever is out of the house to undo their own misfire.
+
+Names on the roster are matched to profiles case-insensitively, and anyone
+without a dashboard profile still appears — as a dashed chip rather than an
+avatar. The chore is theirs whether or not they have ever opened the app.
+
+### The photo wall
+
+Under the agenda on the home screen. Pick photos or drop them onto the card;
+each one is downscaled in the browser to 1600px on its longest edge before
+upload, so a phone album's worth of 4MB originals does not become 4MB down the
+wire every time the home screen paints. A caption typed before picking is
+applied to that batch.
+
+The objects live under `photos/` in the same private `family-media` bucket as
+avatars and chat attachments, so every tile is a signed URL that expires — and,
+as in the chat, they are re-signed on a 7-hour cycle because the kitchen tablet
+is never reloaded. `family_photos.storage_path` is constrained to the `photos/`
+prefix, which is what stops a row here being aimed at somebody's avatar and
+used to delete it.
+
+Taking a photo down removes the row first and the object second: an object
+removed while a row still pointed at it would render as a permanently broken
+tile on every other device, whereas an orphaned object is invisible.
+
 ### Housekeeping
 
 Storage now cleans up after itself: deleting a message removes its object from
@@ -185,8 +248,18 @@ Then run, in order:
   'public.family_message_reactions' in the schema cache*.
 - `supabase/migrations/0004_remove_chores.sql` — removes the retired chores
   feature. Optional and destructive; see the note below.
+- `supabase/migrations/0005_rls_hardening.sql` — privileges, guard triggers and
+  per-command policies.
+- `supabase/migrations/0006_profile_pins.sql` — per-profile PINs and remembered
+  devices.
+- `supabase/migrations/0007_shopping_list.sql` — the shared shopping list.
+- `supabase/migrations/0008_chore_board.sql` — the chore board. **The Chores
+  tab needs this one**; without it every tick fails with *Could not find the
+  table 'public.family_chore_ticks' in the schema cache*.
+- `supabase/migrations/0009_family_photos.sql` — the photo wall on the home
+  screen. **The Calendar tab's photo strip needs this one.**
 
-All four are idempotent — safe to re-run. `0001`–`0003` leave you with:
+All of them are idempotent — safe to re-run. `0001`–`0003` leave you with:
 
 - `family_members`, `family_events`, `family_event_rsvps`,
   `family_calendar_entries`, `family_messages`, `family_message_reactions`,
@@ -366,9 +439,12 @@ src/
     SetupScreen.tsx       first-run: name the household
     ProfileGate.tsx       "Who's using this?"
     Shell.tsx             header, desktop tabs, mobile bottom bar
-    ThemeProvider.tsx     light/dark/system preference, persisted
-    ThemeToggle.tsx       the 🌙/☀️ header button
-    CalendarTab.tsx       upcoming agenda + per-person tabs
+    ThemeProvider.tsx     which palette is active, persisted
+    ThemePicker.tsx       the header swatch button and its menu
+    CalendarTab.tsx       upcoming agenda + per-person tabs + photo wall
+    ChoresTab.tsx         the house rota, grouped by cadence
+    PhotoWall.tsx         the home-screen photo strip and its lightbox
+    ShoppingTab.tsx
     EventsTab.tsx
     ChatTab.tsx           bubbles, attachments, reactions, delete
     CalendarFeeds.tsx     subscribe/import iCal feeds
@@ -380,17 +456,21 @@ src/
     useEvents.ts          events + RSVPs
     useCalendarEntries.ts
     useCalendarFeeds.ts   feed CRUD + useCalendarAutoSync polling
+    useChores.ts          chore ticks for today and this week + Realtime
+    usePhotos.ts          photo rows, signed URLs, upload and removal
+    useShopping.ts
+    useProfileLock.ts     PIN status, unlock, remembered devices
   lib/
     supabase.ts           lazily-created client, config guard
     types.ts              row types, REACTION_EMOJI, the AgendaItem union
     dates.ts              local-time helpers (Monday-first, ISO weeks)
+    themes.ts             the four palettes, their swatches and modes
+    chores.ts             the chore roster — who has what, and how often
     palette.ts            member colours, categories, tint()
     storage.ts            upload / sign / remove in the private bucket
 supabase/
   migrations/
-    0001_family_dashboard.sql
-    0002_media_quotes_ical.sql
-    0003_reactions_and_chores_removal.sql
+    0001_family_dashboard.sql … 0009_family_photos.sql
   functions/family-sync-ical/
 ```
 

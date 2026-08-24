@@ -8,27 +8,36 @@ import {
   useMemo,
   useSyncExternalStore,
 } from "react";
+import {
+  SYSTEM_DARK,
+  SYSTEM_LIGHT,
+  THEME_STORAGE_KEY,
+  isThemeId,
+  themeById,
+  type ThemeDefinition,
+  type ThemeId,
+  type ThemePreference,
+} from "@/lib/themes";
+
+export { THEME_STORAGE_KEY } from "@/lib/themes";
 
 /**
- * Three states, not two. "system" is the default and follows the OS; picking
- * light or dark is a deliberate override that outlives the session. The CSS in
- * `globals.css` is written so that `data-theme` absent means "follow the
- * media query", which is why system is represented by removing the attribute
- * rather than by stamping a third value.
+ * Five states, not two: the four named palettes plus "system", which is the
+ * default and follows the OS. Picking a palette is a deliberate override that
+ * outlives the session.
+ *
+ * "system" is represented by *removing* the stored key rather than by writing
+ * a fifth value, so a browser that has never seen this app and one whose owner
+ * chose "match my system" are indistinguishable — there is no state to
+ * migrate if the default ever changes.
  */
-export type ThemePreference = "light" | "dark" | "system";
-
-/** Must match the key read by the bootstrap script in `layout.tsx`. */
-export const THEME_STORAGE_KEY = "family-dashboard:theme";
 
 interface ThemeContextValue {
   /** What the user chose. */
   preference: ThemePreference;
   /** What that resolves to right now — never "system". */
-  resolved: "light" | "dark";
+  theme: ThemeDefinition;
   setPreference: (next: ThemePreference) => void;
-  /** Light → dark → light. Always lands on an explicit choice. */
-  toggle: () => void;
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -54,7 +63,7 @@ function subscribePreference(onChange: () => void): () => void {
 function preferenceSnapshot(): ThemePreference {
   try {
     const raw = window.localStorage.getItem(THEME_STORAGE_KEY);
-    return raw === "light" || raw === "dark" ? raw : "system";
+    return isThemeId(raw) ? raw : "system";
   } catch {
     // Private mode / storage disabled — the choice just will not persist.
     return "system";
@@ -64,7 +73,7 @@ function preferenceSnapshot(): ThemePreference {
 /**
  * What the prerendered HTML assumes. The bootstrap script has already painted
  * the right colours by this point; returning "system" here only means the
- * toggle's icon settles a beat later, and it keeps hydration free of a
+ * picker's tick settles a beat later, and it keeps hydration free of a
  * mismatch that React would otherwise have to discard the tree over.
  */
 const preferenceServerSnapshot = (): ThemePreference => "system";
@@ -99,23 +108,25 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     schemeServerSnapshot,
   );
 
-  const resolved: "light" | "dark" =
-    preference === "system" ? (systemDark ? "dark" : "light") : preference;
+  const resolvedId: ThemeId =
+    preference === "system" ? (systemDark ? SYSTEM_DARK : SYSTEM_LIGHT) : preference;
+  const theme = themeById(resolvedId);
 
-  // Keep the DOM attribute in step. The bootstrap script sets it before first
-  // paint; this takes over once React is running.
+  // Keep the DOM attributes in step. The bootstrap script sets both before
+  // first paint; this takes over once React is running. `data-mode` is what
+  // `color-scheme` and the `dark:` variant key on — see `globals.css`.
   useEffect(() => {
     const root = document.documentElement;
-    if (preference === "system") root.removeAttribute("data-theme");
-    else root.setAttribute("data-theme", preference);
-  }, [preference]);
+    root.setAttribute("data-theme", theme.id);
+    root.setAttribute("data-mode", theme.mode);
+  }, [theme]);
 
   // The browser chrome (iOS status bar, Android address bar) reads this, and
-  // a static `themeColor` in the metadata cannot follow a runtime toggle.
+  // a static `themeColor` in the metadata cannot follow a runtime switch.
   useEffect(() => {
     const meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
-    if (meta) meta.content = resolved === "dark" ? "#12100e" : "#f6f4f0";
-  }, [resolved]);
+    if (meta) meta.content = theme.chrome;
+  }, [theme]);
 
   const setPreference = useCallback((next: ThemePreference) => {
     try {
@@ -124,23 +135,25 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     } catch {
       // Non-fatal on its own, but the snapshot would then keep reporting the
       // old value and the UI would appear to ignore the tap — so fall back to
-      // driving the attribute directly and leave the preference unpersisted.
+      // driving the attributes directly and leave the preference unpersisted.
       const root = document.documentElement;
-      if (next === "system") root.removeAttribute("data-theme");
-      else root.setAttribute("data-theme", next);
+      const fallback = themeById(
+        next === "system"
+          ? window.matchMedia(SCHEME_QUERY).matches
+            ? SYSTEM_DARK
+            : SYSTEM_LIGHT
+          : next,
+      );
+      root.setAttribute("data-theme", fallback.id);
+      root.setAttribute("data-mode", fallback.mode);
       return;
     }
     for (const listener of listeners) listener();
   }, []);
 
-  const toggle = useCallback(
-    () => setPreference(resolved === "dark" ? "light" : "dark"),
-    [resolved, setPreference],
-  );
-
   const value = useMemo(
-    () => ({ preference, resolved, setPreference, toggle }),
-    [preference, resolved, setPreference, toggle],
+    () => ({ preference, theme, setPreference }),
+    [preference, theme, setPreference],
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;

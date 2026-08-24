@@ -5,13 +5,15 @@ import { useFamily } from "./FamilyProvider";
 import { EventsTab } from "./EventsTab";
 import { CalendarTab } from "./CalendarTab";
 import { ChatTab } from "./ChatTab";
+import { ChoresTab } from "./ChoresTab";
 import { ShoppingTab } from "./ShoppingTab";
 import { ProfileSheet } from "./ProfileSheet";
-import { ThemeToggle } from "./ThemeToggle";
+import { ThemePicker } from "./ThemePicker";
 import { Avatar } from "./ui";
 
 const TABS = [
   { id: "calendar", label: "Calendar", icon: "🗓️" },
+  { id: "chores", label: "Chores", icon: "🧹" },
   { id: "events", label: "Events", icon: "🎟️" },
   { id: "shopping", label: "Shopping", icon: "🛒" },
   { id: "chat", label: "Chat", icon: "💬" },
@@ -40,28 +42,30 @@ export function Shell() {
           </div>
 
           {/* Tabs live in the header on desktop, in a bottom bar everywhere
-              else. Four labelled tabs plus the brand and the profile controls
+              else. Five labelled tabs plus the brand and the profile controls
               do not fit one row until ~1024px, and a bottom bar is the native
-              pattern on a tablet anyway — so the switch happens at `lg`. */}
+              pattern on a tablet anyway — so the switch happens at `lg`.
+              The glyphs are dropped up here: at five tabs they were the
+              difference between fitting and wrapping, and unlike in the bottom
+              bar they sit beside a label that already says the same thing. */}
           <nav className="mx-auto hidden gap-1 lg:flex" aria-label="Sections">
             {TABS.map((t) => (
               <button
                 key={t.id}
                 onClick={() => setTab(t.id)}
                 aria-current={tab === t.id ? "page" : undefined}
-                className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-sm font-semibold transition-[background-color,color,transform] ${
+                className={`inline-flex items-center rounded-xl px-3 py-2 text-sm font-semibold transition-[background-color,color,transform] ${
                   tab === t.id ? "bg-ink text-on-ink shadow-sm" : "text-muted hover:bg-sunk"
                 }`}
               >
-                <span aria-hidden>{t.icon}</span>
                 {t.label}
               </button>
             ))}
           </nav>
 
           <div className="ml-auto flex items-center gap-1 sm:ml-0">
-            <ThemeToggle />
-            {/* At 390px the brand lockup, theme toggle, avatar, name and Switch
+            <ThemePicker />
+            {/* At 390px the brand lockup, theme picker, avatar, name and Switch
                 all competed for one row and pushed Switch against the edge.
                 Below `sm` the avatar alone identifies you — the name is one tap
                 away in the sheet it opens. */}
@@ -91,13 +95,14 @@ export function Shell() {
 
       <main className="dashboard-main mx-auto w-full max-w-5xl flex-1 px-4 pt-5 pb-24 lg:pb-8">
         {tab === "calendar" ? <CalendarTab /> : null}
+        {tab === "chores" ? <ChoresTab /> : null}
         {tab === "events" ? <EventsTab /> : null}
         {tab === "shopping" ? <ShoppingTab /> : null}
         {tab === "chat" ? <ChatTab /> : null}
       </main>
 
       <nav
-        className="mobile-nav border-line bg-surface/95 fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden"
+        className="mobile-nav glass-panel border-line fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden"
         aria-label="Sections"
       >
         {TABS.map((t) => (
