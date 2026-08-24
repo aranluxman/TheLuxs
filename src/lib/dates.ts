@@ -32,6 +32,17 @@ export function startOfWeekMon(d: Date): Date {
   return startOfWeek(d, WEEK_OPTS);
 }
 
+/**
+ * ISO week key — `2026-W35`. The chore board buckets a weekly job by this, so
+ * "vacuumed on Saturday" and "vacuumed on Sunday" are the same tick.
+ *
+ * `RRRR` rather than `yyyy` on purpose: the ISO week-numbering year, which is
+ * what stops 1 January landing in week 53 of a year it does not belong to.
+ */
+export function weekKey(d: Date = new Date()): string {
+  return format(d, "RRRR-'W'II");
+}
+
 export function weekDays(anchor: Date): Date[] {
   const start = startOfWeekMon(anchor);
   return eachDayOfInterval({ start, end: addDays(start, 6) });

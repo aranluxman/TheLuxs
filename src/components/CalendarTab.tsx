@@ -19,6 +19,7 @@ import { CALENDAR_CATEGORIES, categoryStyle, tint } from "@/lib/palette";
 import type { AgendaItem, CalendarEntry, EventRsvp, FamilyEvent } from "@/lib/types";
 import { CalendarFeeds } from "./CalendarFeeds";
 import { useFamily } from "./FamilyProvider";
+import { PhotoWall } from "./PhotoWall";
 import { TodayCard } from "./TodayCard";
 import {
   Avatar,
@@ -337,7 +338,7 @@ export function CalendarTab() {
 
       {/* ----------------------------------------------------------- header */}
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
+        <div className="rule-accent">
           <p className="text-accent text-[11px] font-bold tracking-[0.14em] uppercase">Shared calendar</p>
           <h2 className="mt-1 text-2xl font-bold tracking-tight">
             {activePerson ? `${activePerson.name}'s schedule` : "What's coming up"}
@@ -501,6 +502,12 @@ export function CalendarTab() {
           ) : null}
         </div>
       )}
+
+      {/* Below the agenda on purpose. The schedule is what the home screen is
+          for and has to stay above the fold; the wall is what you find when
+          you scroll, which is the right order for something nobody opens the
+          dashboard to check. */}
+      <PhotoWall />
 
       <CalendarFeeds
         open={feedsOpen}
