@@ -87,6 +87,19 @@ export interface ReactionSummary {
   mine: boolean;
 }
 
+/** One line on the shared shopping list. */
+export interface ShoppingItem {
+  id: string;
+  name: string;
+  /** Free text: "2 boxes", "the big one". Never a number. */
+  note: string | null;
+  added_by: string | null;
+  created_at: string;
+  /** Null means still to buy. Set means done — that is the whole state. */
+  completed_at: string | null;
+  completed_by: string | null;
+}
+
 export interface Quote {
   id: string;
   quote_text: string;
