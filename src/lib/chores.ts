@@ -1,43 +1,36 @@
 /**
- * The household chore roster.
+ * The household chore list.
  *
- * This lives in code, not in a table, and that is the design rather than a
- * shortcut. The old chores feature had a rotation engine in SQL that generated
- * an instance row per chore per period, and it was removed in migration 0004
- * because nobody wanted a scheduler — they wanted the list off the fridge.
- * The roster changes about once a year and by conversation, not by UI.
+ * Chores are no longer assigned to anybody. Every job on this board is open to
+ * whoever gets to it, and finishing one earns that person a point — which is
+ * what turns the board from a rota into a scoreboard. Who did what is recorded
+ * at the moment it is ticked, by tapping a face on the card, rather than
+ * decided in advance here.
  *
- * What *is* in the database is the tick: one row per (chore, period) saying it
- * got done and who did it. Everything else is derived from here.
+ * That is the whole reason this file no longer carries names. A fixed roster
+ * and a points race are different products: with assignees, "Sahana's point"
+ * is a foregone conclusion and the score says nothing; without them, the score
+ * is the only record of who actually did the work.
  *
- * Names rather than member ids, for the same reason. A member id would tie a
- * chore to a row in `family_members` that may not exist yet on a fresh
- * database, and would make this file unreadable. `ChoresTab` resolves names to
- * profiles case-insensitively and falls back to a plain chip for anyone
- * without one — which is what keeps Rayhan on the board even though he has no
- * profile on the dashboard.
+ * The list itself lives in code rather than a table because it changes about
+ * once a year and by conversation, not through a UI. What the database holds
+ * is the tick — see `supabase/migrations/0008_chore_board.sql`.
  */
 
-export type ChoreCadence = "daily" | "weekend" | "flexible";
+export type ChoreCadence = "daily" | "weekend";
 
 export interface ChoreDefinition {
   /**
-   * Stable key. It is the primary key of the tick row, so renaming a chore is
-   * free but changing a key orphans its history.
+   * Stable key. It is half the primary key of the tick row, so renaming a
+   * chore is free but changing a key orphans its history — and, because the
+   * period key's shape follows the cadence, moving a chore between cadences
+   * orphans it too.
    */
   key: string;
   title: string;
   detail: string;
   icon: string;
   cadence: ChoreCadence;
-  /** Who it belongs to, as written on the fridge. */
-  assignees: string[];
-  /**
-   * True when any *one* of the assignees covers it in a given week, rather
-   * than all of them. Changes the wording ("Aran, Rayhan or Sahana") and means
-   * one tick closes the card.
-   */
-  rotational?: boolean;
 }
 
 export interface CadenceMeta {
@@ -47,7 +40,11 @@ export interface CadenceMeta {
   blurb: string;
   /** The badge on each card in this group. */
   badge: string;
-  /** Which period key a tick in this group is filed under. */
+  /**
+   * Which period key a tick in this group is filed under — a local day, or an
+   * ISO week. This is what makes a daily chore worth a point every day and a
+   * weekend one worth a point a week, with no scheduler involved.
+   */
   period: "day" | "week";
 }
 
@@ -55,22 +52,15 @@ export const CADENCES: readonly CadenceMeta[] = [
   {
     id: "daily",
     label: "Every day",
-    blurb: "Resets at midnight.",
+    blurb: "Worth a point each, every day. Resets at midnight.",
     badge: "Daily",
     period: "day",
   },
   {
     id: "weekend",
-    label: "Once a week",
-    blurb: "On the weekend. Resets Monday morning.",
-    badge: "Weekends",
-    period: "week",
-  },
-  {
-    id: "flexible",
-    label: "Shared & flexible",
-    blurb: "Whenever it needs doing — split between the people named.",
-    badge: "Shared",
+    label: "Weekends",
+    blurb: "Once a week, on the weekend. Resets Monday morning.",
+    badge: "Weekend",
     period: "week",
   },
 ];
@@ -82,16 +72,27 @@ export const CHORES: readonly ChoreDefinition[] = [
     detail: "Kitchen, hallway and the dining area.",
     icon: "🧹",
     cadence: "daily",
-    assignees: ["Sahana"],
   },
   {
-    key: "vacuuming",
-    title: "Vacuuming",
-    detail: "Living room, stairs and the bedrooms.",
-    icon: "🌀",
-    cadence: "weekend",
-    assignees: ["Aran", "Rayhan", "Sahana"],
-    rotational: true,
+    key: "wiping_table",
+    title: "Wiping the table",
+    detail: "After dinner — table and the counters.",
+    icon: "🧽",
+    cadence: "daily",
+  },
+  {
+    key: "unloading_dishwasher",
+    title: "Unloading the dishwasher",
+    detail: "Once it has finished, put everything away.",
+    icon: "🍽️",
+    cadence: "daily",
+  },
+  {
+    key: "washing_dishes",
+    title: "Washing the dishes",
+    detail: "Anything that does not go in the dishwasher.",
+    icon: "🫧",
+    cadence: "daily",
   },
   {
     key: "mopping",
@@ -99,8 +100,13 @@ export const CHORES: readonly ChoreDefinition[] = [
     detail: "Kitchen and the hard floors downstairs.",
     icon: "🪣",
     cadence: "weekend",
-    assignees: ["Aran", "Rayhan", "Sahana"],
-    rotational: true,
+  },
+  {
+    key: "vacuuming",
+    title: "Vacuuming",
+    detail: "Living room, stairs and the bedrooms.",
+    icon: "🌀",
+    cadence: "weekend",
   },
   {
     key: "washrooms",
@@ -108,23 +114,6 @@ export const CHORES: readonly ChoreDefinition[] = [
     detail: "Both bathrooms — sinks, mirrors, toilets, tub.",
     icon: "🚿",
     cadence: "weekend",
-    assignees: ["Luxman"],
-  },
-  {
-    key: "recycling",
-    title: "Taking out the recycling",
-    detail: "Blue bin and the green bin on collection night.",
-    icon: "♻️",
-    cadence: "flexible",
-    assignees: ["Aran", "Rayhan"],
-  },
-  {
-    key: "dishwasher",
-    title: "Emptying the dishwasher",
-    detail: "Unload once it has finished, put everything away.",
-    icon: "🍽️",
-    cadence: "flexible",
-    assignees: ["Sukhi", "Aran"],
   },
 ];
 
@@ -134,15 +123,12 @@ export function cadenceMeta(id: ChoreCadence): CadenceMeta {
   return CADENCE_BY_ID.get(id) ?? CADENCES[0];
 }
 
-/** "Sahana", "Aran, Rayhan or Sahana", "Sukhi & Aran". */
-export function assigneeSentence(chore: ChoreDefinition): string {
-  const names = chore.assignees;
-  if (names.length === 1) return names[0];
-  const head = names.slice(0, -1).join(", ");
-  return `${head} ${chore.rotational ? "or" : "&"} ${names[names.length - 1]}`;
-}
-
-/** Every name on the board, in roster order, without duplicates. */
-export const CHORE_PEOPLE: readonly string[] = [
-  ...new Set(CHORES.flatMap((c) => c.assignees)),
-];
+/**
+ * The most points the house can put on the board in one week: every daily
+ * chore on all seven days, plus every weekend chore once. Shown next to the
+ * leaderboard so a score has something to be a fraction of.
+ */
+export const POINTS_AVAILABLE_PER_WEEK = CHORES.reduce(
+  (total, chore) => total + (cadenceMeta(chore.cadence).period === "day" ? 7 : 1),
+  0,
+);

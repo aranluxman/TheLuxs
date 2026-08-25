@@ -48,6 +48,17 @@ export function weekDays(anchor: Date): Date[] {
   return eachDayOfInterval({ start, end: addDays(start, 6) });
 }
 
+/**
+ * The seven `YYYY-MM-DD` keys of the week containing `anchor`, Monday first.
+ *
+ * The chore board loads exactly these plus the week key: a daily chore's ticks
+ * are filed per day, so a week's worth of points cannot be read without naming
+ * all seven days.
+ */
+export function weekDayKeys(anchor: Date = new Date()): string[] {
+  return weekDays(anchor).map(dayKey);
+}
+
 /** The 5- or 6-row grid a month view needs, padded out to whole weeks. */
 export function monthGridDays(anchor: Date): Date[] {
   return eachDayOfInterval({

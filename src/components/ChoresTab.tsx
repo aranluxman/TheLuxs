@@ -1,16 +1,15 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useChores } from "@/hooks/useChores";
 import {
   CADENCES,
   CHORES,
-  CHORE_PEOPLE,
-  assigneeSentence,
+  POINTS_AVAILABLE_PER_WEEK,
   cadenceMeta,
   type ChoreDefinition,
 } from "@/lib/chores";
-import { formatTime, parseISO } from "@/lib/dates";
+import { addDays, format, formatTime, parseISO, startOfWeekMon } from "@/lib/dates";
 import { tint } from "@/lib/palette";
 import type { ChoreTick, MemberWithPhoto } from "@/lib/types";
 import { useFamily } from "./FamilyProvider";
@@ -19,45 +18,135 @@ import { Avatar, Card, ErrorNote } from "./ui";
 /**
  * The chore board.
  *
- * Laid out by *cadence* rather than by person, because that is the question
- * being asked. Standing at the sink you want "what is outstanding today"; you
- * do not want to tab through five people to find out. The per-person filter is
- * there for the other question — "what am I on the hook for" — and it filters
- * the same cards rather than re-grouping them, so the board never changes
- * shape under you.
+ * Nothing here is assigned. Every card is open to whoever gets to it, and the
+ * tick records who that was — so the leaderboard, not the roster, is what says
+ * who does the work in this house.
  *
- * `useChores` is called once, here, and the tick plus a toggle are handed down
- * as props. Calling it inside `ChoreCard` would read better at the call site
- * and would open six realtime subscriptions and six identical queries.
+ * `useChores` is called once, at the top, and each card is handed its tick and
+ * a setter. Calling it inside `ChoreCard` would read better at the call site
+ * and would open seven realtime subscriptions and seven identical queries.
  */
 
-/** Names on the roster resolved to real profiles, matched case-insensitively. */
-type Roster = Map<string, MemberWithPhoto>;
+/* ------------------------------------------------------------ leaderboard */
 
-/* ------------------------------------------------------------ person chip */
+interface Standing {
+  member: MemberWithPhoto;
+  points: number;
+  /** 1-based, and shared by everyone on the same score. */
+  rank: number;
+  leader: boolean;
+}
 
-function PersonChip({ name, member }: { name: string; member: MemberWithPhoto | undefined }) {
-  // Somebody on the roster with no profile on the dashboard still belongs on
-  // the board — the chore is theirs whether or not they have ever opened this.
-  if (!member) {
-    return (
-      <span
-        className="border-line text-muted inline-flex items-center gap-1.5 rounded-full border border-dashed px-2.5 py-1 text-[11px] font-medium"
-        title={`${name} does not have a profile on the dashboard yet`}
-      >
-        {name}
-      </span>
-    );
-  }
+function useStandings(scores: Record<string, number>): Standing[] {
+  const { members } = useFamily();
+  return useMemo(() => {
+    const rows = members
+      .map((member) => ({ member, points: scores[member.id] ?? 0 }))
+      // Points first, then the household's own order, so a table of zeroes on
+      // Monday morning is stable rather than shuffling on every render.
+      .sort((a, b) => b.points - a.points || a.member.sort_order - b.member.sort_order);
+
+    const top = rows[0]?.points ?? 0;
+    const out: Standing[] = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      // Standard competition ranking: equal scores share a rank, and the next
+      // distinct score skips the numbers they used up. Read back off the row
+      // already placed rather than from a running variable, so nothing here
+      // mutates across a render.
+      const above = out[i - 1];
+      const rank = above && above.points === rows[i].points ? above.rank : i + 1;
+      // Nobody leads on nil. A crown for being first to have done nothing
+      // would be the opposite of the point.
+      out.push({ ...rows[i], rank, leader: top > 0 && rows[i].points === top });
+    }
+    return out;
+  }, [members, scores]);
+}
+
+function Leaderboard({ scores }: { scores: Record<string, number> }) {
+  const standings = useStandings(scores);
+  const total = standings.reduce((sum, s) => sum + s.points, 0);
+  const top = standings[0]?.points ?? 0;
+  const leaders = standings.filter((s) => s.leader);
+
+  const weekStart = startOfWeekMon(new Date());
+  const weekLabel = `${format(weekStart, "MMM d")} – ${format(addDays(weekStart, 6), "MMM d")}`;
 
   return (
-    <span
-      className="inline-flex items-center gap-1.5 rounded-full py-1 pr-2.5 pl-1 text-[11px] font-medium"
-      style={{ backgroundColor: tint(member.color, 0.16), color: member.color }}
-    >
-      <Avatar member={member} size="xs" />
-      {member.name}
-    </span>
+    <Card className="glass-panel overflow-hidden">
+      <div className="border-line flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b px-4 py-3">
+        <div>
+          <h3 className="text-sm font-bold tracking-tight">This week&rsquo;s leaderboard</h3>
+          <p className="text-faint text-[11px]">{weekLabel} · resets Monday</p>
+        </div>
+        <p className="text-muted text-xs tabular-nums">
+          <span className="text-accent font-bold">{total}</span> of{" "}
+          {POINTS_AVAILABLE_PER_WEEK} points claimed
+        </p>
+      </div>
+
+      <ol className="divide-line divide-y">
+        {standings.map((s) => (
+          <li
+            key={s.member.id}
+            className="flex items-center gap-3 px-4 py-2.5"
+            style={s.leader ? { backgroundColor: tint(s.member.color, 0.08) } : undefined}
+          >
+            <span
+              className={`w-5 shrink-0 text-center text-xs font-bold tabular-nums ${
+                s.leader ? "text-accent" : "text-faint"
+              }`}
+            >
+              {s.leader ? "👑" : s.rank}
+            </span>
+
+            <Avatar member={s.member} size="sm" ring={s.leader} />
+
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-semibold">{s.member.name}</span>
+              {/* A bar against the leader's score, not against the weekly
+                  maximum: the question on a scoreboard is "how far behind am
+                  I", and against 31 every real score is a sliver. */}
+              <span className="bg-sunk mt-1 block h-1.5 overflow-hidden rounded-full">
+                <span
+                  className="block h-full rounded-full transition-[width] duration-500"
+                  style={{
+                    width: top > 0 ? `${(s.points / top) * 100}%` : "0%",
+                    backgroundColor: s.member.color,
+                  }}
+                />
+              </span>
+            </span>
+
+            <span className="shrink-0 text-right">
+              <span className="block text-sm font-bold tabular-nums">{s.points}</span>
+              <span className="text-faint block text-[10px]">
+                {s.points === 1 ? "point" : "points"}
+              </span>
+            </span>
+          </li>
+        ))}
+      </ol>
+
+      <p className="text-muted border-line border-t px-4 py-2.5 text-xs">
+        {total === 0 ? (
+          <>No points yet this week — first chore done takes the lead.</>
+        ) : leaders.length === 1 ? (
+          <>
+            <strong className="text-ink font-semibold">{leaders[0].member.name}</strong> has
+            done the most chores this week.
+          </>
+        ) : (
+          <>
+            <strong className="text-ink font-semibold">
+              {leaders.map((l) => l.member.name).join(" and ")}
+            </strong>{" "}
+            are tied for the most chores this week.
+          </>
+        )}
+      </p>
+    </Card>
   );
 }
 
@@ -66,31 +155,23 @@ function PersonChip({ name, member }: { name: string; member: MemberWithPhoto | 
 function ChoreCard({
   chore,
   tick,
-  roster,
-  onToggle,
+  onSetDoneBy,
 }: {
   chore: ChoreDefinition;
   tick: ChoreTick | null;
-  roster: Roster;
-  onToggle: (done: boolean) => void;
+  onSetDoneBy: (memberId: string | null) => void;
 }) {
-  const { byId } = useFamily();
+  const { members, byId } = useFamily();
 
   const done = tick !== null;
   const meta = cadenceMeta(chore.cadence);
   const doneBy = tick?.done_by ? byId[tick.done_by] : null;
 
-  // The left edge takes the assignee's colour when there is exactly one owner.
-  // A shared chore has no single colour to claim, so it falls back to the
-  // theme accent rather than picking a name arbitrarily.
-  const owner =
-    chore.assignees.length === 1 ? roster.get(chore.assignees[0].toLowerCase()) : undefined;
-
   return (
     <Card
       className="chore-card tile-lift flex flex-col gap-3 p-4"
       data-done={done}
-      style={owner ? ({ "--chore-hue": owner.color } as React.CSSProperties) : undefined}
+      style={doneBy ? ({ "--chore-hue": doneBy.color } as React.CSSProperties) : undefined}
     >
       <div className="flex items-start gap-3">
         <span
@@ -102,11 +183,7 @@ function ChoreCard({
 
         <div className="min-w-0 flex-1">
           <div className="flex items-start gap-2">
-            <h4
-              className={`min-w-0 flex-1 text-[15px] leading-snug font-semibold ${
-                done ? "text-muted" : ""
-              }`}
-            >
+            <h4 className="min-w-0 flex-1 text-[15px] leading-snug font-semibold">
               {chore.title}
             </h4>
             <span className="bg-accent-soft text-accent shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold tracking-[0.08em] uppercase">
@@ -117,42 +194,56 @@ function ChoreCard({
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-1.5">
-        {chore.assignees.map((name) => (
-          <PersonChip key={name} name={name} member={roster.get(name.toLowerCase())} />
-        ))}
-        {chore.rotational ? (
-          <span className="text-faint text-[11px]">· any one of them</span>
-        ) : null}
+      {/* Everyone's face on every card. Tapping one is the whole interaction:
+          it claims the chore, or hands it to whoever actually did it if the
+          first tap was wrong. */}
+      <div className="mt-auto">
+        <p className="text-faint mb-2 text-[11px] font-semibold">
+          {done ? "Point goes to" : "Who did it?"}
+        </p>
+        <div className="flex flex-wrap gap-1.5">
+          {members.map((m) => {
+            const mine = tick?.done_by === m.id;
+            return (
+              <button
+                key={m.id}
+                onClick={() => onSetDoneBy(mine ? null : m.id)}
+                aria-pressed={mine}
+                title={
+                  mine
+                    ? `${m.name} did this — tap again to undo`
+                    : `${m.name} did this`
+                }
+                aria-label={
+                  mine
+                    ? `${m.name} did ${chore.title}. Tap again to undo.`
+                    : `Give the point for ${chore.title} to ${m.name}`
+                }
+                className={`inline-flex min-h-9 items-center gap-1.5 rounded-full border py-1 pr-2.5 pl-1 text-xs font-semibold transition-colors ${
+                  mine ? "text-ink" : "border-line text-muted hover:bg-sunk"
+                }`}
+                style={
+                  mine
+                    ? { borderColor: m.color, backgroundColor: tint(m.color, 0.16) }
+                    : undefined
+                }
+              >
+                <Avatar member={m} size="xs" />
+                {m.name}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
-      {/* The whole strip is the control, not a 20px box. This gets tapped in
-          passing, one-handed, often with wet hands. */}
-      <button
-        onClick={() => onToggle(!done)}
-        aria-pressed={done}
-        className={`mt-auto flex min-h-11 w-full items-center gap-2.5 rounded-lg border px-3 py-2 text-left text-sm font-semibold transition-colors ${
-          done ? "border-success/40 text-success" : "border-line hover:bg-sunk text-ink"
-        }`}
-      >
-        <span
-          className={`grid h-5 w-5 shrink-0 place-items-center rounded-md border text-[11px] ${
-            done ? "border-success bg-success text-on-ink" : "border-line"
-          }`}
-          aria-hidden
-        >
-          {done ? "✓" : ""}
-        </span>
-        {done ? (
-          <span className="min-w-0 flex-1 truncate font-medium">
-            Done
-            {doneBy ? ` by ${doneBy.name}` : ""}
-            {tick ? ` · ${formatTime(parseISO(tick.done_at))}` : ""}
-          </span>
-        ) : (
-          <span className="flex-1">Mark done</span>
-        )}
-      </button>
+      {done ? (
+        <p className="text-success border-success/30 flex items-center gap-1.5 border-t pt-2.5 text-xs font-medium">
+          <span aria-hidden>✓</span>
+          {doneBy ? `${doneBy.name} · ` : ""}
+          {tick ? formatTime(parseISO(tick.done_at)) : ""}
+          <span className="text-faint ml-auto font-normal">+1 point</span>
+        </p>
+      ) : null}
     </Card>
   );
 }
@@ -160,25 +251,7 @@ function ChoreCard({
 /* --------------------------------------------------------------------- tab */
 
 export function ChoresTab() {
-  const { members, currentMember } = useFamily();
-  const { tickFor, setDone, progress, loading, error } = useChores();
-  const [person, setPerson] = useState<string | null>(null);
-
-  const roster: Roster = useMemo(() => {
-    const byName = new Map<string, MemberWithPhoto>();
-    for (const m of members) byName.set(m.name.trim().toLowerCase(), m);
-    return byName;
-  }, [members]);
-
-  const visible = useMemo(
-    () =>
-      person
-        ? CHORES.filter((c) =>
-            c.assignees.some((a) => a.toLowerCase() === person.toLowerCase()),
-          )
-        : CHORES,
-    [person],
-  );
+  const { tickFor, setDoneBy, scores, progress, loading, error } = useChores();
 
   const pct = progress.total === 0 ? 0 : Math.round((progress.done / progress.total) * 100);
 
@@ -192,121 +265,75 @@ export function ChoresTab() {
         </p>
         <h2 className="mt-1 text-2xl font-bold tracking-tight">Chore board</h2>
         <p className="text-muted mt-0.5 text-sm">
-          Who has what, and what is still outstanding. Daily jobs reset at midnight;
-          weekly ones reset on Monday morning.
+          Nothing is assigned. Do a chore, tap your name, take the point — most points
+          by Sunday night wins the week.
         </p>
       </div>
 
-      {/* --------------------------------------------------------- progress */}
-      <Card className="glass-panel p-4">
-        <div className="flex items-baseline justify-between gap-3">
-          <p className="text-sm font-semibold">
-            {progress.done} of {progress.total} done
-            <span className="text-muted font-normal"> right now</span>
-          </p>
-          <p className="text-accent text-sm font-bold tabular-nums">{pct}%</p>
-        </div>
-        <div
-          className="bg-sunk mt-2.5 h-2 overflow-hidden rounded-full"
-          role="progressbar"
-          aria-valuenow={progress.done}
-          aria-valuemin={0}
-          aria-valuemax={progress.total}
-          aria-label="Chores completed"
-        >
-          <div
-            className="bg-accent h-full rounded-full transition-[width] duration-500"
-            style={{ width: `${pct}%` }}
-          />
-        </div>
-      </Card>
-
-      {/* ----------------------------------------------------------- filter */}
-      <div className="flex flex-wrap gap-2" role="tablist" aria-label="Whose chores">
-        <button
-          role="tab"
-          aria-selected={person === null}
-          onClick={() => setPerson(null)}
-          className={`inline-flex shrink-0 items-center gap-2 rounded-full border px-3.5 py-2 text-sm font-medium transition-colors ${
-            person === null
-              ? "border-ink bg-ink text-on-ink"
-              : "border-line bg-surface text-muted hover:bg-sunk"
-          }`}
-        >
-          <span aria-hidden>👪</span>
-          Everyone
-          <span className="text-[11px] tabular-nums opacity-70">{CHORES.length}</span>
-        </button>
-
-        {CHORE_PEOPLE.map((name) => {
-          const member = roster.get(name.toLowerCase());
-          const active = person === name;
-          const count = CHORES.filter((c) => c.assignees.includes(name)).length;
-          return (
-            <button
-              key={name}
-              role="tab"
-              aria-selected={active}
-              onClick={() => setPerson(active ? null : name)}
-              className={`inline-flex shrink-0 items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
-                active
-                  ? "text-ink border-ink"
-                  : "border-line bg-surface text-muted hover:bg-sunk"
-              }`}
-              style={
-                active && member
-                  ? { borderColor: member.color, backgroundColor: tint(member.color, 0.14) }
-                  : undefined
-              }
-            >
-              {member ? <Avatar member={member} size="sm" ring={active} /> : null}
-              {name}
-              <span className="text-[11px] tabular-nums opacity-70">{count}</span>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* ------------------------------------------------------------ board */}
       {loading ? (
-        <div className="grid gap-3 sm:grid-cols-2" role="status" aria-label="Loading the board">
-          <span className="skeleton block h-40 rounded-xl" />
-          <span className="skeleton block h-40 rounded-xl" />
+        <div className="space-y-3" role="status" aria-label="Loading the board">
+          <span className="skeleton block h-56 rounded-xl" />
+          <div className="grid gap-3 sm:grid-cols-2">
+            <span className="skeleton block h-44 rounded-xl" />
+            <span className="skeleton block h-44 rounded-xl" />
+          </div>
         </div>
       ) : (
-        CADENCES.map((cadence) => {
-          const group = visible.filter((c) => c.cadence === cadence.id);
-          if (group.length === 0) return null;
-          return (
-            <section key={cadence.id}>
-              <div className="mb-3">
-                <h3 className="text-muted text-[11px] font-bold tracking-[0.12em] uppercase">
-                  {cadence.label}
-                </h3>
-                <p className="text-faint mt-0.5 text-xs">{cadence.blurb}</p>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2">
-                {group.map((chore) => (
-                  <ChoreCard
-                    key={chore.key}
-                    chore={chore}
-                    tick={tickFor(chore)}
-                    roster={roster}
-                    onToggle={(done) => void setDone(chore, done, currentMember?.id ?? null)}
-                  />
-                ))}
-              </div>
-            </section>
-          );
-        })
-      )}
+        <>
+          <Leaderboard scores={scores} />
 
-      {/* The roster in one line, for anyone who wants the whole arrangement
-          without reading six cards — and for a screen reader, where the cards
-          are a long way apart. */}
-      <p className="text-faint border-line border-t pt-4 text-center text-xs">
-        {CHORES.map((c) => `${c.title}: ${assigneeSentence(c)}`).join(" · ")}
-      </p>
+          {/* ------------------------------------------------------ progress */}
+          <div>
+            <div className="mb-1.5 flex items-baseline justify-between gap-3">
+              <p className="text-muted text-[11px] font-bold tracking-[0.12em] uppercase">
+                On the board right now
+              </p>
+              <p className="text-muted text-xs tabular-nums">
+                {progress.done} of {progress.total} done · {pct}%
+              </p>
+            </div>
+            <div
+              className="bg-sunk h-2 overflow-hidden rounded-full"
+              role="progressbar"
+              aria-valuenow={progress.done}
+              aria-valuemin={0}
+              aria-valuemax={progress.total}
+              aria-label="Chores done right now"
+            >
+              <div
+                className="bg-accent h-full rounded-full transition-[width] duration-500"
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+          </div>
+
+          {/* --------------------------------------------------------- board */}
+          {CADENCES.map((cadence) => {
+            const group = CHORES.filter((c) => c.cadence === cadence.id);
+            if (group.length === 0) return null;
+            return (
+              <section key={cadence.id}>
+                <div className="mb-3">
+                  <h3 className="text-muted text-[11px] font-bold tracking-[0.12em] uppercase">
+                    {cadence.label}
+                  </h3>
+                  <p className="text-faint mt-0.5 text-xs">{cadence.blurb}</p>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {group.map((chore) => (
+                    <ChoreCard
+                      key={chore.key}
+                      chore={chore}
+                      tick={tickFor(chore)}
+                      onSetDoneBy={(memberId) => void setDoneBy(chore, memberId)}
+                    />
+                  ))}
+                </div>
+              </section>
+            );
+          })}
+        </>
+      )}
     </div>
   );
 }
