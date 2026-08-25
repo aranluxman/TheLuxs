@@ -336,6 +336,12 @@ export function CalendarTab() {
 
       <TodayCard />
 
+      {/* Above the agenda rather than below it. The schedule has the stronger
+          claim on the fold, but a photo wall nobody scrolls to is a photo wall
+          nobody posts to — and posting is the half of this that only works if
+          people find it. */}
+      <PhotoWall />
+
       {/* ----------------------------------------------------------- header */}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="rule-accent">
@@ -502,12 +508,6 @@ export function CalendarTab() {
           ) : null}
         </div>
       )}
-
-      {/* Below the agenda on purpose. The schedule is what the home screen is
-          for and has to stay above the fold; the wall is what you find when
-          you scroll, which is the right order for something nobody opens the
-          dashboard to check. */}
-      <PhotoWall />
 
       <CalendarFeeds
         open={feedsOpen}
