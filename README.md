@@ -14,7 +14,7 @@ Built with **Next.js 16 (App Router, TypeScript)**, **Tailwind CSS v4**,
 | Tab | What it does |
 | --- | --- |
 | **Calendar** | An agenda of what is actually coming up, over the next 2 weeks, 4 weeks or 3 months. Posted events and everyone's schedule entries merge into one chronological list, grouped by day. Tabs across the top switch between *Everyone* and one person, so anyone can pull up just their own week. Below the agenda sits the **photo wall**. |
-| **Chores** | The house rota, grouped by how often each job comes round — every day, once a week on the weekend, and the shared jobs. One tap marks a chore done; it records who did it and when, and resets itself at midnight (daily) or on Monday morning (weekly). |
+| **Chores** | The house chore board and a weekly points race. Nothing is assigned: every job is open to whoever gets to it, and you record who did one by tapping their face on the card. Each finished chore is worth a point, and the leaderboard at the top of the tab shows who is ahead this week. Daily chores reset at midnight, weekend ones on Monday morning. |
 | **Events** | The family activity board — movie night, the CNE, a trip downtown. Title, date/time, location, notes, and a per-person RSVP checklist (Going / Maybe / Can't). |
 | **Chat** | An iMessage-style group thread — grouped bubbles, day separators, timestamps, sender colours, and live delivery over Supabase Realtime. Photos, files and voice notes attach to messages; tap any message to react with 👍 ❤️ 😂; you can delete your own. |
 
@@ -175,29 +175,57 @@ npx supabase functions deploy family-sync-ical --project-ref <your-ref>
 
 ### The chore board
 
-The roster lives in code, in [`src/lib/chores.ts`](src/lib/chores.ts) — who has
-what, how often, and whether the job rotates between people. It changes about
-once a year and by conversation, so a table and an admin screen would be more
-machinery than the problem deserves.
+Seven jobs, and none of them belong to anybody:
 
-What the database holds is the *tick*: one row per (chore, period) saying it
-got done and who did it. There is nothing to generate ahead of time, nothing to
-backfill when the roster changes, and no period a chore can be missing from —
-an absent row is simply "not done yet".
+| Chore | How often | Points a week |
+| --- | --- | --- |
+| Sweeping | Every day | 7 |
+| Wiping the table | Every day | 7 |
+| Unloading the dishwasher | Every day | 7 |
+| Washing the dishes | Every day | 7 |
+| Mopping | Weekends | 1 |
+| Vacuuming | Weekends | 1 |
+| Cleaning the washrooms | Weekends | 1 |
+
+**31 points are on the table each week.** Finishing a chore is worth one, and
+you claim it by tapping your own face on the card — every member's name is on
+every card. Tap a different face and the point moves to them; tap the
+highlighted one again and the chore reopens.
+
+That "nothing is assigned" is the design, not a shortcut. A fixed roster and a
+points race are different products: if the sweeping is always Sahana's, her
+point is a foregone conclusion and the score records nothing. Unassigned, the
+leaderboard is the only account of who actually did the work — which is the
+whole reason the tab exists.
+
+The list itself lives in code, in [`src/lib/chores.ts`](src/lib/chores.ts),
+because it changes about once a year and by conversation. What the database
+holds is the *tick*: one row per (chore, period) saying it got done and who did
+it. There is nothing to generate ahead of time, nothing to backfill when the
+list changes, and no period a chore can be missing from — an absent row is
+simply "not done yet".
 
 `period_key` is a local day (`2026-08-24`) for a daily chore and an ISO week
-(`2026-W35`) for a weekly one, which is what makes the board reset itself at
-midnight and on Monday morning without a scheduler. It is computed on the
-client, because the client is the only party that knows the household's
-timezone; a server-side `now()` would file a Sunday-evening sweep under Monday
-for anyone west of UTC.
+(`2026-W35`) for a weekend one, which is what makes the board reset itself at
+midnight and on Monday morning without a scheduler, and what makes a daily
+chore worth seven points a week and a weekend one worth a single point. It is
+computed on the client, because the client is the only party that knows the
+household's timezone; a server-side `now()` would file a Sunday-evening sweep
+under Monday for anyone west of UTC.
 
-Anyone can untick anyone's chore. On a shared board the alternative is chasing
-whoever is out of the house to undo their own misfire.
+The tab loads eight period keys at once — the seven days of the current week
+plus the week itself — because a daily chore's ticks are filed one per day, so
+Monday's sweep and Friday's sweep are separate rows and a week's score cannot
+be read without naming all seven.
 
-Names on the roster are matched to profiles case-insensitively, and anyone
-without a dashboard profile still appears — as a dashed chip rather than an
-avatar. The chore is theirs whether or not they have ever opened the app.
+**Ranking** is standard competition ranking: equal scores share a place and the
+next distinct score skips the numbers they used up, so two people on two points
+are both 2nd and the next is 4th. Nobody is crowned on nil — a leader only
+appears once somebody has actually done something — and a tie at the top lists
+everyone involved.
+
+Anyone can reopen anyone's chore. On a shared board the alternative is chasing
+whoever is out of the house to undo their own mis-tap.
 
 ### The photo wall
 
@@ -258,6 +286,9 @@ Then run, in order:
   table 'public.family_chore_ticks' in the schema cache*.
 - `supabase/migrations/0009_family_photos.sql` — the photo wall on the home
   screen. **The Calendar tab's photo strip needs this one.**
+- `supabase/migrations/0010_chore_reassignment.sql` — lets a chore change
+  hands. **The Chores tab needs this one too**; without it, tapping a second
+  person on a card that is already ticked fails instead of moving the point.
 
 All of them are idempotent — safe to re-run. `0001`–`0003` leave you with:
 
@@ -442,7 +473,7 @@ src/
     ThemeProvider.tsx     which palette is active, persisted
     ThemePicker.tsx       the header swatch button and its menu
     CalendarTab.tsx       upcoming agenda + per-person tabs + photo wall
-    ChoresTab.tsx         the house rota, grouped by cadence
+    ChoresTab.tsx         leaderboard + chore cards, grouped by cadence
     PhotoWall.tsx         the home-screen photo strip and its lightbox
     ShoppingTab.tsx
     EventsTab.tsx
@@ -456,7 +487,7 @@ src/
     useEvents.ts          events + RSVPs
     useCalendarEntries.ts
     useCalendarFeeds.ts   feed CRUD + useCalendarAutoSync polling
-    useChores.ts          chore ticks for today and this week + Realtime
+    useChores.ts          a week of ticks, the scores and Realtime
     usePhotos.ts          photo rows, signed URLs, upload and removal
     useShopping.ts
     useProfileLock.ts     PIN status, unlock, remembered devices
@@ -465,7 +496,7 @@ src/
     types.ts              row types, REACTION_EMOJI, the AgendaItem union
     dates.ts              local-time helpers (Monday-first, ISO weeks)
     themes.ts             the four palettes, their swatches and modes
-    chores.ts             the chore roster — who has what, and how often
+    chores.ts             the chore list, cadences and the weekly points cap
     palette.ts            member colours, categories, tint()
     storage.ts            upload / sign / remove in the private bucket
 supabase/
