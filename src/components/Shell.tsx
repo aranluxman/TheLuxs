@@ -1,12 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import { usePrefs } from "@/hooks/usePrefs";
+import { WIDTH_CLASS } from "@/lib/prefs";
 import { useFamily } from "./FamilyProvider";
-import { EventsTab } from "./EventsTab";
 import { CalendarTab } from "./CalendarTab";
 import { ChatTab } from "./ChatTab";
 import { ChoresTab } from "./ChoresTab";
 import { ShoppingTab } from "./ShoppingTab";
+import { SettingsTab } from "./SettingsTab";
 import { ProfileSheet } from "./ProfileSheet";
 import { ThemePicker } from "./ThemePicker";
 import { Avatar } from "./ui";
@@ -14,23 +16,29 @@ import { Avatar } from "./ui";
 const TABS = [
   { id: "calendar", label: "Calendar", icon: "🗓️" },
   { id: "chores", label: "Chores", icon: "🧹" },
-  { id: "events", label: "Events", icon: "🎟️" },
   { id: "shopping", label: "Shopping", icon: "🛒" },
   { id: "chat", label: "Chat", icon: "💬" },
+  { id: "settings", label: "Settings", icon: "⚙️" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
 
 export function Shell() {
   const { currentMember, setCurrentMemberId } = useFamily();
-  // Chores used to open the app. The calendar is the thing everyone checks now.
-  const [tab, setTab] = useState<TabId>("calendar");
+  const { prefs } = usePrefs();
+  // Which tab opens is a per-device setting; the calendar is the default.
+  // Read once as the initial value rather than tracked, so changing it in
+  // Settings does not yank the tab out from under whoever is changing it — it
+  // takes effect on the next visit, which is what "opens on" means.
+  const [tab, setTab] = useState<TabId>(() => prefs.startTab);
   const [profilesOpen, setProfilesOpen] = useState(false);
+
+  const width = WIDTH_CLASS[prefs.width];
 
   return (
     <div className="flex min-h-full flex-1 flex-col">
       <header className="app-header border-line bg-canvas/85 sticky top-0 z-30 border-b backdrop-blur">
-        <div className="mx-auto flex w-full max-w-5xl items-center gap-3 px-4 py-3">
+        <div className={`mx-auto flex w-full ${width} items-center gap-3 px-4 py-3`}>
           <div className="brand-lockup flex items-center gap-2.5">
             <span className="brand-mark" aria-hidden>F</span>
             <div>
@@ -93,12 +101,12 @@ export function Shell() {
         </div>
       </header>
 
-      <main className="dashboard-main mx-auto w-full max-w-5xl flex-1 px-4 pt-5 pb-24 lg:pb-8">
+      <main className={`dashboard-main mx-auto w-full ${width} flex-1 px-4 pt-5 pb-24 lg:pb-8`}>
         {tab === "calendar" ? <CalendarTab /> : null}
         {tab === "chores" ? <ChoresTab /> : null}
-        {tab === "events" ? <EventsTab /> : null}
         {tab === "shopping" ? <ShoppingTab /> : null}
         {tab === "chat" ? <ChatTab /> : null}
+        {tab === "settings" ? <SettingsTab /> : null}
       </main>
 
       <nav

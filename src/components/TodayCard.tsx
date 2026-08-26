@@ -101,8 +101,10 @@ export function TodayCard() {
               </p>
             </div>
           ) : (
+            // The Events tab is gone; the calendar is where things get added
+            // now, and this card already sits on top of it.
             <p className="text-faint text-xs">
-              Nothing on the board yet. Plan something on the Events tab.
+              Nothing coming up yet. Add something to the calendar below.
             </p>
           )}
         </div>

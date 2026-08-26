@@ -4,6 +4,9 @@ A shared calendar, a chore board, a shopping list, a photo wall and a group
 chat for a five-person household — one page, five tabs, live on every device
 in the house.
 
+The **photo wall sits on the home screen**, directly under the day's summary:
+pick photos or drop them onto the card and everyone sees them straight away.
+
 Built with **Next.js 16 (App Router, TypeScript)**, **Tailwind CSS v4**,
 **Supabase** (Postgres + Realtime) and deployed as a **static site on Cloudflare Pages**.
 
@@ -15,7 +18,7 @@ Built with **Next.js 16 (App Router, TypeScript)**, **Tailwind CSS v4**,
 | --- | --- |
 | **Calendar** | An agenda of what is actually coming up, over the next 2 weeks, 4 weeks or 3 months. Posted events and everyone's schedule entries merge into one chronological list, grouped by day. Tabs across the top switch between *Everyone* and one person, so anyone can pull up just their own week. Below the agenda sits the **photo wall**. |
 | **Chores** | The house chore board and a weekly points race. Nothing is assigned: every job is open to whoever gets to it, and you record who did one by tapping their face on the card. Each finished chore is worth a point, and the leaderboard at the top of the tab shows who is ahead this week. Daily chores reset at midnight, weekend ones on Monday morning. |
-| **Events** | The family activity board — movie night, the CNE, a trip downtown. Title, date/time, location, notes, and a per-person RSVP checklist (Going / Maybe / Can't). |
+| **Settings** | One small column: the page colour, which tab the dashboard opens on, how wide the content runs, your name, photo and colour, and your PIN. Everything above the fold on a tablet. |
 | **Chat** | An iMessage-style group thread — grouped bubbles, day separators, timestamps, sender colours, and live delivery over Supabase Realtime. Photos, files and voice notes attach to messages; tap any message to react with 👍 ❤️ 😂; you can delete your own. |
 
 Every screen also carries a **profile photo** per person, and the Calendar tab
@@ -226,6 +229,35 @@ everyone involved.
 
 Anyone can reopen anyone's chore. On a shared board the alternative is chasing
 whoever is out of the house to undo their own mis-tap.
+
+### Settings
+
+One narrow column of four small blocks, because everything in it is a thing you
+change once and forget:
+
+| Block | What it holds | Where it lives |
+| --- | --- | --- |
+| **Page colour** | The four palettes plus *Match system* | `localStorage` |
+| **Layout** | Which tab the dashboard opens on; standard or wide content | `localStorage` |
+| **You** | Your name, photo and colour | Postgres |
+| **Your PIN** | Set or change it; forget this device | Postgres |
+
+The split is deliberate. Theme and layout describe *the screen you are holding*
+— the kitchen tablet wants the wide layout and to open on the calendar, a phone
+in a pocket wants neither — so syncing them across devices would make the
+setting worse. Name, photo, colour and PIN describe *you*, and the rest of the
+household sees them.
+
+"Opens on" is read once, as the initial tab, rather than tracked. Otherwise
+changing it in Settings would yank the tab out from under whoever is changing
+it; it takes effect on the next visit, which is what the words mean.
+
+**A forgotten PIN cannot be reset from this screen, by design.** Changing one
+requires the current PIN, and clearing one outright is `family_admin_clear_pin`,
+which migration 0006 deliberately never granted to the browser. A self-serve
+reset would let anyone holding the tablet clear anyone else's PIN, which is
+precisely what the PIN exists to stop. The settings block says so rather than
+hiding it.
 
 ### The photo wall
 
@@ -476,7 +508,7 @@ src/
     ChoresTab.tsx         leaderboard + chore cards, grouped by cadence
     PhotoWall.tsx         the home-screen photo strip and its lightbox
     ShoppingTab.tsx
-    EventsTab.tsx
+    SettingsTab.tsx       theme, layout, your profile, your PIN
     ChatTab.tsx           bubbles, attachments, reactions, delete
     CalendarFeeds.tsx     subscribe/import iCal feeds
     TodayCard.tsx         quote + next event + "looking forward to"
@@ -484,7 +516,8 @@ src/
   hooks/
     useMessages.ts        history + Realtime + attachment lifecycle
     useReactions.ts       reaction rows + Realtime + optimistic toggle
-    useEvents.ts          events + RSVPs
+    useEvents.ts          events + RSVPs (read-only; feeds the agenda)
+    usePrefs.ts           per-device layout choices, persisted
     useCalendarEntries.ts
     useCalendarFeeds.ts   feed CRUD + useCalendarAutoSync polling
     useChores.ts          a week of ticks, the scores and Realtime
@@ -496,6 +529,7 @@ src/
     types.ts              row types, REACTION_EMOJI, the AgendaItem union
     dates.ts              local-time helpers (Monday-first, ISO weeks)
     themes.ts             the four palettes, their swatches and modes
+    prefs.ts              start tab and content width
     chores.ts             the chore list, cadences and the weekly points cap
     palette.ts            member colours, categories, tint()
     storage.ts            upload / sign / remove in the private bucket

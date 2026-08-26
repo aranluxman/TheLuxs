@@ -125,13 +125,13 @@ export function PhotoWall() {
     <section>
       <SectionTitle
         action={
-          <button
+          <Button
             onClick={() => fileRef.current?.click()}
             disabled={uploading}
-            className="text-accent text-xs font-semibold disabled:opacity-50"
+            className="min-h-9 px-3 py-1.5 text-xs"
           >
-            {uploading ? "Uploading…" : "+ Add photos"}
-          </button>
+            {uploading ? "Uploading…" : "＋ Add photos"}
+          </Button>
         }
       >
         Family photos
