@@ -6,7 +6,10 @@ import { EventsTab } from "./EventsTab";
 import { CalendarTab } from "./CalendarTab";
 import { ChatTab } from "./ChatTab";
 import { ProfileSheet } from "./ProfileSheet";
+import { AppIconSheet } from "./AppIconSheet";
+import { InstallButton } from "./InstallButton";
 import { ThemeToggle } from "./ThemeToggle";
+import { useAppIcon } from "./AppIconProvider";
 import { Avatar } from "./ui";
 
 const TABS = [
@@ -19,15 +22,30 @@ type TabId = (typeof TABS)[number]["id"];
 
 export function Shell() {
   const { currentMember, setCurrentMemberId } = useFamily();
+  const { iconUrl } = useAppIcon();
   // Chores used to open the app. The calendar is the thing everyone checks now.
   const [tab, setTab] = useState<TabId>("calendar");
   const [profilesOpen, setProfilesOpen] = useState(false);
+  const [iconOpen, setIconOpen] = useState(false);
 
   return (
     <div className="flex min-h-full flex-1 flex-col">
       <header className="border-line bg-canvas/85 sticky top-0 z-30 border-b backdrop-blur">
         <div className="mx-auto flex w-full max-w-5xl items-center gap-3 px-4 py-3">
-          <h1 className="text-base font-semibold">Family Dashboard</h1>
+          {/* The mark doubles as the way in to changing it. */}
+          <button
+            onClick={() => setIconOpen(true)}
+            className="hover:bg-sunk -m-1 flex items-center gap-2 rounded-xl p-1"
+            title="Change the app icon"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={iconUrl ?? "/icons/icon-192.png"}
+              alt=""
+              className="border-line h-7 w-7 rounded-lg border object-cover"
+            />
+            <h1 className="hidden text-base font-semibold sm:block">Family Dashboard</h1>
+          </button>
 
           {/* Tabs live in the header on desktop, in a bottom bar on phones. */}
           <nav className="mx-auto hidden gap-1 sm:flex" aria-label="Sections">
@@ -46,6 +64,7 @@ export function Shell() {
           </nav>
 
           <div className="ml-auto flex items-center gap-1 sm:ml-0">
+            <InstallButton />
             <ThemeToggle />
             <button
               onClick={() => setProfilesOpen(true)}
@@ -94,6 +113,7 @@ export function Shell() {
       </nav>
 
       <ProfileSheet open={profilesOpen} onClose={() => setProfilesOpen(false)} />
+      <AppIconSheet open={iconOpen} onClose={() => setIconOpen(false)} />
     </div>
   );
 }
