@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { THEME_STORAGE_KEY } from "@/components/ThemeProvider";
+import { APP_ICON_CACHE_KEY } from "@/lib/appIcon";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -16,6 +17,19 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Family Dashboard",
   description: "Events, calendar and chat for the whole house.",
+  applicationName: "Family Dashboard",
+  // The default marks. A family photo uploaded in the app replaces the first
+  // two at runtime; see src/lib/appIcon.ts.
+  icons: {
+    icon: [
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+  },
+  // Makes an iPhone open the home-screen copy without Safari's chrome, which
+  // is the whole point of installing it.
+  appleWebApp: { capable: true, title: "Family", statusBarStyle: "default" },
 };
 
 export const viewport: Viewport = {
@@ -45,6 +59,29 @@ const NO_FLASH_SCRIPT = `
       document.documentElement.setAttribute("data-theme", choice);
     }
   } catch (e) {}
+
+  // The household's own icon, straight from the cache. React swaps in the
+  // shared copy once it has one; this is only so the tab does not show the
+  // default mark for a second first.
+  try {
+    var raw = localStorage.getItem(${JSON.stringify(APP_ICON_CACHE_KEY)});
+    var icon = raw ? JSON.parse(raw) : null;
+    if (icon && icon.dataUrl) {
+      var link = document.createElement("link");
+      link.setAttribute("data-family-icon", "");
+      link.rel = "icon";
+      link.href = icon.dataUrl;
+      document.head.appendChild(link);
+    }
+  } catch (e) {}
+
+  // Chrome fires this before React exists, and an install prompt that is not
+  // captured is gone for the rest of the visit — with it, the ability to
+  // install at all. Parked on window for the header button to pick up.
+  window.addEventListener("beforeinstallprompt", function (e) {
+    e.preventDefault();
+    window.__familyInstallPrompt = e;
+  });
 })();
 `;
 

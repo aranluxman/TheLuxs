@@ -21,7 +21,7 @@ function extensionFor(file: Blob, fallback: string): string {
  */
 export async function uploadMedia(
   file: Blob,
-  folder: "avatars" | "chat",
+  folder: "avatars" | "chat" | "branding",
   fallbackExt = "bin",
 ): Promise<{ path: string } | { error: string }> {
   if (file.size > MAX_UPLOAD_BYTES) {
