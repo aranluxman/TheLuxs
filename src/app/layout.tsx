@@ -7,6 +7,7 @@ import {
   THEME_STORAGE_KEY,
   themeById,
 } from "@/lib/themes";
+import { APP_ICON_CACHE_KEY } from "@/lib/appIcon";
 import "./globals.css";
 
 /**
@@ -27,6 +28,26 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Family Dashboard",
   description: "Calendar, chores, shopping, photos and chat for the whole house.",
+  applicationName: "Family Dashboard",
+  // The default marks. A family photo uploaded in the app replaces these at
+  // runtime; see src/lib/appIcon.ts.
+  //
+  // The SVG is listed first and every current browser prefers it, which is what
+  // makes the tab icon sharp at any zoom. The PNGs stay as the fallback. Note
+  // that src/app/icon.svg is *also* picked up by the App Router file
+  // convention; listing it here as well is deliberate, so the precedence is
+  // stated in the code rather than left to a convention.
+  icons: {
+    icon: [
+      { url: "/icon.svg", type: "image/svg+xml" },
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+  },
+  // Makes an iPhone open the home-screen copy without Safari's chrome, which
+  // is the whole point of installing it.
+  appleWebApp: { capable: true, title: "Family", statusBarStyle: "default" },
 };
 
 export const viewport: Viewport = {
@@ -70,6 +91,29 @@ const NO_FLASH_SCRIPT = `
   var root = document.documentElement;
   root.setAttribute("data-theme", choice);
   root.setAttribute("data-mode", MODES[choice]);
+
+  // The household's own icon, straight from the cache. React swaps in the
+  // shared copy once it has one; this is only so the tab does not show the
+  // default mark for a second first.
+  try {
+    var raw = localStorage.getItem(${JSON.stringify(APP_ICON_CACHE_KEY)});
+    var icon = raw ? JSON.parse(raw) : null;
+    if (icon && icon.dataUrl) {
+      var link = document.createElement("link");
+      link.setAttribute("data-family-icon", "");
+      link.rel = "icon";
+      link.href = icon.dataUrl;
+      document.head.appendChild(link);
+    }
+  } catch (e) {}
+
+  // Chrome fires this before React exists, and an install prompt that is not
+  // captured is gone for the rest of the visit — with it, the ability to
+  // install at all. Parked on window for the header button to pick up.
+  window.addEventListener("beforeinstallprompt", function (e) {
+    e.preventDefault();
+    window.__familyInstallPrompt = e;
+  });
 })();
 `;
 

@@ -11,6 +11,10 @@ import { ShoppingTab } from "./ShoppingTab";
 import { SettingsTab } from "./SettingsTab";
 import { ProfileSheet } from "./ProfileSheet";
 import { ThemePicker } from "./ThemePicker";
+import { AppIconSheet } from "./AppIconSheet";
+import { BrandMark } from "./BrandMark";
+import { InstallButton } from "./InstallButton";
+import { useAppIcon } from "./AppIconProvider";
 import { Avatar } from "./ui";
 
 const TABS = [
@@ -25,6 +29,7 @@ type TabId = (typeof TABS)[number]["id"];
 
 export function Shell() {
   const { currentMember, setCurrentMemberId } = useFamily();
+  const { iconUrl } = useAppIcon();
   const { prefs } = usePrefs();
   // Which tab opens is a per-device setting; the calendar is the default.
   // Read once as the initial value rather than tracked, so changing it in
@@ -32,6 +37,7 @@ export function Shell() {
   // takes effect on the next visit, which is what "opens on" means.
   const [tab, setTab] = useState<TabId>(() => prefs.startTab);
   const [profilesOpen, setProfilesOpen] = useState(false);
+  const [iconOpen, setIconOpen] = useState(false);
 
   const width = WIDTH_CLASS[prefs.width];
 
@@ -39,15 +45,32 @@ export function Shell() {
     <div className="flex min-h-full flex-1 flex-col">
       <header className="app-header border-line bg-canvas/85 sticky top-0 z-30 border-b backdrop-blur">
         <div className={`mx-auto flex w-full ${width} items-center gap-3 px-4 py-3`}>
-          <div className="brand-lockup flex items-center gap-2.5">
-            <span className="brand-mark" aria-hidden>F</span>
+          {/* The mark doubles as the way in to changing it. It is the app's own
+              icon rather than a monogram, so the header, the browser tab and
+              the home screen all show the same thing — and it is vector, so it
+              stays sharp at any pixel ratio. */}
+          <button
+            onClick={() => setIconOpen(true)}
+            className="brand-lockup hover:bg-sunk -m-1 flex items-center gap-2.5 rounded-xl p-1 text-left"
+            title="Change the app icon"
+          >
+            {iconUrl ? (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                src={iconUrl}
+                alt=""
+                className="border-line h-8 w-8 rounded-[0.625rem] border object-cover"
+              />
+            ) : (
+              <BrandMark title={null} className="h-8 w-8 rounded-[0.625rem]" />
+            )}
             <div>
               <h1 className="text-sm font-bold tracking-tight sm:text-base">Family Dashboard</h1>
               <p className="text-faint hidden text-[10px] font-semibold tracking-[0.14em] uppercase sm:block">
                 Together, in sync
               </p>
             </div>
-          </div>
+          </button>
 
           {/* Tabs live in the header on desktop, in a bottom bar everywhere
               else. Five labelled tabs plus the brand and the profile controls
@@ -72,6 +95,7 @@ export function Shell() {
           </nav>
 
           <div className="ml-auto flex items-center gap-1 sm:ml-0">
+            <InstallButton />
             <ThemePicker />
             {/* At 390px the brand lockup, theme picker, avatar, name and Switch
                 all competed for one row and pushed Switch against the edge.
@@ -132,6 +156,7 @@ export function Shell() {
       </nav>
 
       <ProfileSheet open={profilesOpen} onClose={() => setProfilesOpen(false)} />
+      <AppIconSheet open={iconOpen} onClose={() => setIconOpen(false)} />
     </div>
   );
 }

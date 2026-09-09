@@ -1,6 +1,8 @@
 "use client";
 
 import { isSupabaseConfigured } from "@/lib/supabase";
+import { AppIconProvider } from "./AppIconProvider";
+import { ServiceWorkerRegistrar } from "./ServiceWorkerRegistrar";
 import { FamilyProvider, useFamily } from "./FamilyProvider";
 import { ProfileGate } from "./ProfileGate";
 import { ThemeProvider } from "./ThemeProvider";
@@ -61,16 +63,21 @@ function Gate() {
 
 export function App() {
   // The theme wraps even the misconfigured state — a white flash on a dark
-  // tablet is the first thing anyone would notice, error page or not.
+  // tablet is the first thing anyone would notice, error page or not. The icon
+  // provider sits just as high, because it owns the <link rel="icon"> tags and
+  // those belong to the document, not to any one screen.
   return (
     <ThemeProvider>
-      {isSupabaseConfigured ? (
-        <FamilyProvider>
-          <Gate />
-        </FamilyProvider>
-      ) : (
-        <MissingConfig />
-      )}
+      <AppIconProvider>
+        <ServiceWorkerRegistrar />
+        {isSupabaseConfigured ? (
+          <FamilyProvider>
+            <Gate />
+          </FamilyProvider>
+        ) : (
+          <MissingConfig />
+        )}
+      </AppIconProvider>
     </ThemeProvider>
   );
 }

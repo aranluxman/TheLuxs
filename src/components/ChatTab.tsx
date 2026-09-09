@@ -9,8 +9,11 @@ import { tint } from "@/lib/palette";
 import { formatBytes, formatDuration, uploadMedia } from "@/lib/storage";
 import {
   REACTION_EMOJI,
+  conversationKeyFor,
   type AttachmentKind,
+  type ConversationId,
   type Message,
+  type MemberWithPhoto,
   type ReactionEmoji,
   type ReactionSummary,
 } from "@/lib/types";
@@ -254,10 +257,109 @@ function ReactionPicker({
   );
 }
 
+/* ---------------------------------------------------------- Conversations */
+
+/** The "something happened here" mark on a conversation you are not reading. */
+function UnreadDot() {
+  return (
+    <span className="bg-accent absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full">
+      <span className="sr-only">Unread messages</span>
+    </span>
+  );
+}
+
+/**
+ * Everyone, or one person.
+ *
+ * Deliberately the same pill strip the Calendar tab uses for whose schedule to
+ * show — this is the second place in the app that means "filter to one member",
+ * and two different controls for one idea is how an app starts feeling
+ * assembled rather than designed.
+ *
+ * Two differences from that one. You are not in the list: a message to yourself
+ * is rejected by a CHECK constraint and means nothing anyway. And the pills set
+ * rather than toggle, because Everyone has its own pill to go back to.
+ */
+function ConversationBar({
+  peers,
+  meId,
+  active,
+  unread,
+  disabled,
+  onPick,
+}: {
+  peers: MemberWithPhoto[];
+  meId: string | null;
+  active: ConversationId;
+  unread: Record<string, boolean>;
+  disabled: boolean;
+  onPick: (id: ConversationId) => void;
+}) {
+  const dotFor = (target: ConversationId) =>
+    meId ? unread[conversationKeyFor(meId, target)] : false;
+
+  return (
+    <div
+      className="scroll-area -mx-1 mb-3 flex gap-2 overflow-x-auto px-1 pb-1"
+      role="tablist"
+      aria-label="Conversation"
+    >
+      <button
+        role="tab"
+        aria-selected={active === null}
+        disabled={disabled}
+        onClick={() => onPick(null)}
+        className={`relative inline-flex shrink-0 items-center gap-2 rounded-full border px-3.5 py-2 text-sm font-medium transition-colors disabled:opacity-50 ${
+          active === null
+            ? "border-ink bg-ink text-on-ink"
+            : "border-line bg-surface text-muted hover:bg-sunk"
+        }`}
+      >
+        <span aria-hidden>👪</span>
+        Everyone
+        {active !== null && dotFor(null) ? <UnreadDot /> : null}
+      </button>
+
+      {peers.map((m) => {
+        const isActive = active === m.id;
+        return (
+          <button
+            key={m.id}
+            role="tab"
+            aria-selected={isActive}
+            disabled={disabled}
+            onClick={() => onPick(m.id)}
+            className={`relative inline-flex shrink-0 items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors disabled:opacity-50 ${
+              isActive ? "text-ink" : "border-line bg-surface text-muted hover:bg-sunk"
+            }`}
+            style={
+              isActive
+                ? { borderColor: m.color, backgroundColor: tint(m.color, 0.14) }
+                : undefined
+            }
+          >
+            <Avatar member={m} size="sm" ring={isActive} />
+            {m.name}
+            {!isActive && dotFor(m.id) ? <UnreadDot /> : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------- Tab */
 
 export function ChatTab() {
-  const { currentMember, byId } = useFamily();
+  const { currentMember, byId, members } = useFamily();
+  const meId = currentMember?.id ?? null;
+
+  /** `null` is the family thread; a member id is a one-to-one conversation. */
+  const [conversation, setConversation] = useState<ConversationId>(null);
+  const peers = useMemo(() => members.filter((m) => m.id !== meId), [members, meId]);
+  const peerIds = useMemo(() => peers.map((m) => m.id), [peers]);
+  const other = conversation ? (byId[conversation] ?? null) : null;
+
   const {
     messages,
     mediaUrls,
@@ -265,10 +367,11 @@ export function ChatTab() {
     loadingOlder,
     hasOlder,
     error,
+    unread,
     sendMessage,
     deleteMessage,
     loadOlder,
-  } = useMessages();
+  } = useMessages(meId, conversation, peerIds);
   const reactions = useReactions();
   const recorder = useVoiceRecorder();
 
@@ -285,7 +388,6 @@ export function ChatTab() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const pinnedToBottom = useRef(true);
 
-  const meId = currentMember?.id ?? null;
   const rows = useMemo(() => render(messages, meId), [messages, meId]);
 
   // Pull reactions for whatever is on screen, including pages loaded later.
@@ -314,7 +416,19 @@ export function ChatTab() {
     if (!loading && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [loading]);
+    // `conversation` is in here so that switching into an already-cached thread
+    // still opens at the bottom — that path never flips `loading`.
+  }, [loading, conversation]);
+
+  // A reaction picker or a delete prompt is anchored to one message. Carrying
+  // either across a switch leaves an overlay pointing at nothing.
+  function pickConversation(next: ConversationId) {
+    if (next === conversation) return;
+    setActiveId(null);
+    setPendingDelete(null);
+    pinnedToBottom.current = true;
+    setConversation(next);
+  }
 
   // Dismiss the picker on Escape, matching the modal's behaviour.
   useEffect(() => {
@@ -332,13 +446,18 @@ export function ChatTab() {
     if (!body || !currentMember) return;
     setDraft("");
     pinnedToBottom.current = true;
-    await sendMessage(currentMember.id, body);
+    await sendMessage(currentMember.id, conversation, body);
   }
 
   async function onFilePicked(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = ""; // let the same file be picked again later
     if (!file || !currentMember) return;
+
+    // Captured before the upload: an await is long enough for someone to tap a
+    // different pill, and a photo delivered to the wrong person is not a bug
+    // you can take back.
+    const target = conversation;
 
     setUploadError(null);
     setBusy("Uploading…");
@@ -358,13 +477,14 @@ export function ChatTab() {
       duration: null,
     };
     pinnedToBottom.current = true;
-    await sendMessage(currentMember.id, draft.trim(), attachment);
+    await sendMessage(currentMember.id, target, draft.trim(), attachment);
     setDraft("");
     setBusy(null);
   }
 
   async function finishRecording() {
     if (!currentMember) return;
+    const target = conversation; // see onFilePicked
     const clip = await recorder.stop();
     if (!clip) return;
 
@@ -378,7 +498,7 @@ export function ChatTab() {
     }
 
     pinnedToBottom.current = true;
-    await sendMessage(currentMember.id, "", {
+    await sendMessage(currentMember.id, target, "", {
       path: uploaded.path,
       kind: "voice",
       name: "Voice note",
@@ -408,7 +528,30 @@ export function ChatTab() {
   const deletingPhoto = pendingDelete?.attachment_kind === "image";
 
   return (
+    // The height is unchanged by the conversation bar on purpose: this is a
+    // fixed-height column and the scroll area is the only flex-1 child, so a
+    // new sibling shrinks the message list rather than pushing the composer off
+    // the bottom. Padding it out for the bar would just leave dead space.
     <div className="flex h-[calc(100dvh-12.5rem)] flex-col sm:h-[calc(100dvh-9.5rem)]">
+      <ConversationBar
+        peers={peers}
+        meId={meId}
+        active={conversation}
+        unread={unread}
+        // Switching mid-upload would strand the "Uploading…" state on a thread
+        // that is no longer open.
+        disabled={Boolean(busy)}
+        onPick={pickConversation}
+      />
+
+      {other ? (
+        <p className="text-faint mb-2 px-1 text-[11px] leading-snug">
+          Just between you and {other.name} — the rest of the family can&rsquo;t see this
+          in the app. It isn&rsquo;t private from anyone with the site link, though;
+          there&rsquo;s no login yet.
+        </p>
+      ) : null}
+
       <ErrorNote message={error ?? uploadError ?? reactions.error ?? recorder.error} />
 
       <div
@@ -424,11 +567,19 @@ export function ChatTab() {
           </div>
         ) : rows.length === 0 ? (
           <div className="text-muted flex h-full flex-col items-center justify-center gap-2 text-center">
-            <span className="text-4xl" aria-hidden>
-              💬
-            </span>
-            <p className="text-ink text-sm font-medium">No messages yet</p>
-            <p className="text-xs">Say hello to the family.</p>
+            {other ? (
+              <Avatar member={other} size="lg" />
+            ) : (
+              <span className="text-4xl" aria-hidden>
+                💬
+              </span>
+            )}
+            <p className="text-ink text-sm font-medium">
+              {other ? `No messages with ${other.name} yet` : "No messages yet"}
+            </p>
+            <p className="text-xs">
+              {other ? `Start a conversation with ${other.name}.` : "Say hello to the family."}
+            </p>
           </div>
         ) : (
           <>
@@ -638,7 +789,11 @@ export function ChatTab() {
             maxLength={2000}
             placeholder={
               busy ??
-              (currentMember ? `Message as ${currentMember.name}…` : "Pick a profile first")
+              (!currentMember
+                ? "Pick a profile first"
+                : other
+                  ? `Message ${other.name}…`
+                  : `Message as ${currentMember.name}…`)
             }
             disabled={!canSend}
             className="border-line bg-surface text-ink placeholder:text-faint focus:border-accent focus:ring-accent/20 max-h-32 min-h-[2.75rem] flex-1 resize-none rounded-2xl border px-4 py-3 text-sm shadow-sm focus:outline-none focus:ring-4 disabled:opacity-60"
@@ -676,7 +831,9 @@ export function ChatTab() {
         title={deletingPhoto ? "Delete this photo?" : "Delete this message?"}
       >
         <p className="text-muted text-sm">
-          This removes it for everyone in the family, on every device.
+          {other
+            ? `This removes it for both you and ${other.name}, on every device.`
+            : "This removes it for everyone in the family, on every device."}
           {pendingDelete?.attachment_path ? (
             <>
               {" "}
@@ -695,7 +852,7 @@ export function ChatTab() {
             Cancel
           </Button>
           <Button type="button" variant="danger" disabled={deleting} onClick={confirmDelete}>
-            {deleting ? "Deleting…" : "Delete for everyone"}
+            {deleting ? "Deleting…" : other ? "Delete for both" : "Delete for everyone"}
           </Button>
         </div>
       </Modal>
