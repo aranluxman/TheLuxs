@@ -7,6 +7,7 @@ import { CalendarTab } from "./CalendarTab";
 import { ChatTab } from "./ChatTab";
 import { ProfileSheet } from "./ProfileSheet";
 import { AppIconSheet } from "./AppIconSheet";
+import { BrandMark } from "./BrandMark";
 import { InstallButton } from "./InstallButton";
 import { ThemeToggle } from "./ThemeToggle";
 import { useAppIcon } from "./AppIconProvider";
@@ -38,12 +39,20 @@ export function Shell() {
             className="hover:bg-sunk -m-1 flex items-center gap-2 rounded-xl p-1"
             title="Change the app icon"
           >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={iconUrl ?? "/icons/icon-192.png"}
-              alt=""
-              className="border-line h-7 w-7 rounded-lg border object-cover"
-            />
+            {iconUrl ? (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                src={iconUrl}
+                alt=""
+                className="border-line h-7 w-7 rounded-lg border object-cover"
+              />
+            ) : (
+              // Vector by default, so the mark is sharp at any pixel ratio. A
+              // household photo is still a raster <img> — there is nothing to
+              // be done about that, and a photo does not have hard edges to
+              // lose anyway.
+              <BrandMark title={null} className="border-line h-7 w-7 rounded-lg border" />
+            )}
             <h1 className="hidden text-base font-semibold sm:block">Family Dashboard</h1>
           </button>
 

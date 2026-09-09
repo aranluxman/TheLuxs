@@ -2,15 +2,31 @@
  * Draws the default launcher icons into `public/icons/`.
  *
  * These are the fallback marks — the household replaces them from inside the
- * app (Settings → app icon) with a family photo. They exist because an
- * installable web app needs real PNGs at fixed paths before the browser will
- * offer the install prompt at all, and because a freshly cloned repo should
- * not ship a blank square.
+ * app (the mark in the header → App icon) with a family photo. They exist
+ * because an installable web app needs real PNGs at fixed paths before the
+ * browser will offer the install prompt at all, and because a freshly cloned
+ * repo should not ship a blank square.
  *
  * Pure Node: a tiny rasteriser plus zlib, so there is no image dependency to
  * install on a machine that only ever runs `next build`. Re-run with
  *   node scripts/generate-app-icons.mjs
  * after changing any of the constants below.
+ *
+ * ---------------------------------------------------------------------------
+ * THE ARTWORK LIVES IN THREE PLACES AND THEY MUST AGREE
+ *
+ *   scripts/generate-app-icons.mjs   this file — the raster masters, for the
+ *                                    Android launcher, iOS home screen and the
+ *                                    maskable icon, none of which take an SVG
+ *   src/app/icon.svg                 the browser tab, which is why the tab is
+ *                                    sharp at any zoom or pixel ratio
+ *   src/components/BrandMark.tsx     the mark in the app's own header
+ *
+ * `GEOMETRY` below is the single source of truth. It is expressed as fractions
+ * of the artwork box (origin top-left) so the same numbers scale into any of
+ * the three. Change a number here and port it to the other two in the same
+ * commit, or the tab and the home screen quietly stop matching.
+ * ---------------------------------------------------------------------------
  */
 import { deflateSync } from "node:zlib";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -19,14 +35,54 @@ import { fileURLToPath } from "node:url";
 
 const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "public", "icons");
 
-const INK = [0x22, 0x1f, 0x1c]; // warm near-black, the app's dark canvas
+/*
+ * The plate is a warm near-black with a gentle top-to-bottom lift. A flat fill
+ * is what made the old mark look unfinished at 512px: at that size the eye
+ * expects the plate to be a surface, not a swatch.
+ *
+ * PLATE_BOTTOM is the app's own `--color-ink`. The previous version used a
+ * slightly different near-black (#221f1c), so the icon and the UI disagreed by
+ * a few points for no reason.
+ */
+const PLATE_TOP = [0x2a, 0x26, 0x22];
+const PLATE_BOTTOM = [0x1c, 0x19, 0x17]; // --color-ink
 const CREAM = [0xf6, 0xf4, 0xf0]; // --color-canvas
 const ACCENT = [0xb4, 0x53, 0x09]; // --color-accent
 
 /** Edges are sampled this many times per axis, then averaged. Cheap AA. */
-const SAMPLES = 4;
+const SAMPLES = 6;
 
-/* ------------------------------------------------------------- geometry --
+/* -------------------------------------------------------------- geometry --
+ * Every coordinate is a fraction of the artwork box, origin top-left. Ported
+ * verbatim into icon.svg and BrandMark.tsx — see the header.
+ */
+const GEOMETRY = {
+  // A steeper pitch than the old mark, and a real overhang past the walls.
+  // The old roof spanned 0.04–0.96 over walls at 0.15–0.85, which read as a
+  // wide flat wedge rather than a roof.
+  roof: { apex: [0.5, 0.09], left: [0.09, 0.47], right: [0.91, 0.47] },
+  walls: { x0: 0.19, y0: 0.45, x1: 0.81, y1: 0.91, r: 0.06 },
+  // Emerges from the right slope. Small, but it is the detail that stops the
+  // mark reading as generated rather than drawn.
+  chimney: { x0: 0.66, y0: 0.15, x1: 0.755, y1: 0.36, r: 0.022 },
+  // Two lobes and a point, centred in the wall face below the eaves.
+  heart: {
+    r: 0.088,
+    lobes: [
+      [0.423, 0.615],
+      [0.577, 0.615],
+    ],
+    point: [
+      [0.345, 0.640],
+      [0.655, 0.640],
+      [0.5, 0.838],
+    ],
+  },
+  /** Plate corner radius, as a fraction of the *plate*, not the artwork box. */
+  plateCorner: 0.22,
+};
+
+/* ------------------------------------------------------------- predicates --
  * Every shape is a predicate over the unit square, so the same drawing code
  * renders at any pixel size and the artwork can be scaled into the safe area
  * of a maskable icon without being redrawn.
@@ -64,27 +120,31 @@ const union =
   (x, y) =>
     shapes.some((s) => s(x, y));
 
-/* ------------------------------------------------------------- the mark --
- * A house with a heart in it, drawn in the app's own palette. Coordinates are
- * fractions of the artwork box, origin top-left.
- */
+/* ------------------------------------------------------------- the mark --- */
 
-const ROOF = triangle([0.5, 0.08], [0.04, 0.45], [0.96, 0.45]);
-const WALLS = roundedRect(0.15, 0.42, 0.85, 0.93, 0.07);
-const HOUSE = union(ROOF, WALLS);
+const { roof, walls, chimney, heart } = GEOMETRY;
+
+const HOUSE = union(
+  triangle(roof.apex, roof.left, roof.right),
+  roundedRect(walls.x0, walls.y0, walls.x1, walls.y1, walls.r),
+  // Unioned with the roof, so the buried half of the chimney costs nothing.
+  roundedRect(chimney.x0, chimney.y0, chimney.x1, chimney.y1, chimney.r),
+);
 
 const HEART = union(
-  circle(0.427, 0.6, 0.083),
-  circle(0.573, 0.6, 0.083),
-  triangle([0.345, 0.618], [0.655, 0.618], [0.5, 0.82]),
+  circle(heart.lobes[0][0], heart.lobes[0][1], heart.r),
+  circle(heart.lobes[1][0], heart.lobes[1][1], heart.r),
+  triangle(heart.point[0], heart.point[1], heart.point[2]),
 );
 
 /* ----------------------------------------------------------- rasteriser --- */
 
+const lerp = (a, b, t) => a + (b - a) * t;
+
 /**
  * @param size      edge length in pixels
- * @param inset     fraction of the edge left empty around the artwork; 0.2 keeps
- *                  the mark inside Android's 66% maskable safe area
+ * @param inset     fraction of the edge left empty around the artwork; 0.22
+ *                  keeps the mark inside Android's 66% maskable safe area
  * @param cornerR   corner radius as a fraction of the edge; 0 = full bleed,
  *                  which is what iOS and maskable icons want (they mask it
  *                  themselves, and a pre-rounded icon shows dark corners)
@@ -98,6 +158,15 @@ function render(size, { inset = 0.16, cornerR = 0 } = {}) {
   const toArt = (u) => (u - inset) / span;
 
   for (let py = 0; py < size; py++) {
+    // The plate's gradient runs down the whole icon, so it is a property of the
+    // row rather than of a sub-sample — one lerp per scanline, not per sample.
+    const t = (py + 0.5) / size;
+    const base = [
+      lerp(PLATE_TOP[0], PLATE_BOTTOM[0], t),
+      lerp(PLATE_TOP[1], PLATE_BOTTOM[1], t),
+      lerp(PLATE_TOP[2], PLATE_BOTTOM[2], t),
+    ];
+
     for (let px = 0; px < size; px++) {
       let plateHits = 0;
       let houseHits = 0;
@@ -121,7 +190,6 @@ function render(size, { inset = 0.16, cornerR = 0 } = {}) {
       // Composite back-to-front in coverage space so edges blend instead of
       // stair-stepping. The heart sits on the house, the house on the plate.
       const alpha = plateHits / total;
-      const base = INK;
       const houseMix = houseHits / total;
       const heartMix = heartHits / total;
       const covered = houseMix + heartMix;
@@ -189,10 +257,12 @@ function encodePng(size, pixels) {
 /* -------------------------------------------------------------- targets --- */
 
 const TARGETS = [
-  // Browser tab and the manifest's "any" purpose: rounded, because nothing
-  // else is going to round it.
-  { file: "icon-192.png", size: 192, cornerR: 0.22, inset: 0.14 },
-  { file: "icon-512.png", size: 512, cornerR: 0.22, inset: 0.14 },
+  // The manifest's "any" purpose: rounded, because nothing else is going to
+  // round it. The browser tab is served by src/app/icon.svg instead, so these
+  // no longer have to carry a job they were never sharp enough for.
+  { file: "icon-192.png", size: 192, cornerR: GEOMETRY.plateCorner, inset: 0.14 },
+  { file: "icon-256.png", size: 256, cornerR: GEOMETRY.plateCorner, inset: 0.14 },
+  { file: "icon-512.png", size: 512, cornerR: GEOMETRY.plateCorner, inset: 0.14 },
   // Android adaptive icons crop to a circle or a squircle, so the plate is
   // full-bleed and the mark stays well inside the safe area.
   { file: "icon-maskable-512.png", size: 512, cornerR: 0, inset: 0.22 },

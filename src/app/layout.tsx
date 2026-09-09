@@ -18,10 +18,17 @@ export const metadata: Metadata = {
   title: "Family Dashboard",
   description: "Events, calendar and chat for the whole house.",
   applicationName: "Family Dashboard",
-  // The default marks. A family photo uploaded in the app replaces the first
-  // two at runtime; see src/lib/appIcon.ts.
+  // The default marks. A family photo uploaded in the app replaces these at
+  // runtime; see src/lib/appIcon.ts.
+  //
+  // The SVG is listed first and every current browser prefers it, which is what
+  // makes the tab icon sharp at any zoom. The PNGs stay as the fallback. Note
+  // that src/app/icon.svg is *also* picked up by the App Router file
+  // convention; listing it here as well is deliberate, so the precedence is
+  // stated in the code rather than left to a convention.
   icons: {
     icon: [
+      { url: "/icon.svg", type: "image/svg+xml" },
       { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
       { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
     ],
