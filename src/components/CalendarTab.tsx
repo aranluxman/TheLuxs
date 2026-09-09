@@ -15,10 +15,11 @@ import {
   parseISO,
   toLocalInputValue,
 } from "@/lib/dates";
-import { CALENDAR_CATEGORIES, tint } from "@/lib/palette";
+import { CALENDAR_CATEGORIES, categoryStyle, tint } from "@/lib/palette";
 import type { AgendaItem, CalendarEntry, EventRsvp, FamilyEvent } from "@/lib/types";
 import { CalendarFeeds } from "./CalendarFeeds";
 import { useFamily } from "./FamilyProvider";
+import { PhotoWall } from "./PhotoWall";
 import { TodayCard } from "./TodayCard";
 import {
   Avatar,
@@ -33,12 +34,22 @@ import {
 
 /** How far ahead each range option looks. */
 const RANGES = [
-  { id: "2w", label: "2 weeks", days: 14 },
-  { id: "4w", label: "4 weeks", days: 28 },
-  { id: "3m", label: "3 months", days: 92 },
+  // `short` is what a 390px phone shows: the full labels wrapped onto two
+  // lines each, turning the segmented control into a three-storey block.
+  { id: "2w", label: "2 weeks", short: "2w", days: 14 },
+  { id: "4w", label: "4 weeks", short: "4w", days: 28 },
+  { id: "3m", label: "3 months", short: "3m", days: 92 },
 ] as const;
 
 type RangeId = (typeof RANGES)[number]["id"];
+
+/**
+ * Days of agenda shown before the Load more button, and how many each press
+ * adds. Counted in *days that have something on them* rather than calendar
+ * days: a run of empty days renders nothing, so paging by calendar date would
+ * hand back a button that reveals blank space.
+ */
+const DAYS_PER_PAGE = 3;
 
 /** `null` is the "Everyone" tab. */
 type PersonFilter = string | null;
@@ -117,6 +128,17 @@ function belongsTo(item: AgendaItem, person: PersonFilter): boolean {
 
 const KIND_ICON = { event: "🎟️", entry: "•" } as const;
 
+/**
+ * An entry's icon comes from its category; an event keeps the ticket glyph,
+ * because "event" is a kind rather than a category and reads as its own thing.
+ */
+function rowGlyph(item: AgendaItem): { icon: string; label: string; hue: string } {
+  if (item.kind === "event") {
+    return { icon: KIND_ICON.event, label: "Event", hue: "#b45309" };
+  }
+  return categoryStyle(item.subtitle);
+}
+
 function AgendaRow({
   item,
   onDelete,
@@ -127,9 +149,10 @@ function AgendaRow({
   const { byId } = useFamily();
   const owners = item.memberIds.map((id) => byId[id]).filter(Boolean);
   const color = owners[0]?.color ?? "#a8a29e";
+  const glyph = rowGlyph(item);
 
   return (
-    <li className="group hover:bg-sunk/50 flex items-start gap-3 rounded-xl px-2 py-2.5 transition-colors">
+    <li className="group hover:bg-sunk/50 flex items-start gap-3 rounded-xl px-2 py-3 transition-[background-color,transform] hover:translate-x-px">
       {/* A colour bar reads faster than a dot at a glance across the kitchen. */}
       <span
         className="mt-0.5 w-1 shrink-0 self-stretch rounded-full"
@@ -146,13 +169,21 @@ function AgendaRow({
       </span>
 
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium">
-          <span className="mr-1.5 text-xs" aria-hidden>
-            {KIND_ICON[item.kind]}
+        <p className="flex items-center gap-1.5 text-sm font-medium">
+          <span
+            className="grid h-5 w-5 shrink-0 place-items-center rounded-md text-[11px]"
+            style={{ backgroundColor: tint(glyph.hue, 0.16) }}
+            title={glyph.label}
+            aria-hidden
+          >
+            {glyph.icon}
           </span>
-          {item.title}
+          <span className="min-w-0 truncate">{item.title}</span>
         </p>
         <p className="text-faint mt-0.5 text-xs">
+          {/* Screen readers get the category as words; sighted users get the
+              glyph above, so it is not repeated as text twice. */}
+          <span className="sr-only">{glyph.label}. </span>
           {item.end ? `until ${formatTime(item.end)}` : null}
           {item.end && item.subtitle ? " · " : null}
           {item.subtitle}
@@ -189,6 +220,7 @@ export function CalendarTab() {
 
   const [person, setPerson] = useState<PersonFilter>(null);
   const [range, setRange] = useState<RangeId>("4w");
+  const [visibleDays, setVisibleDays] = useState(DAYS_PER_PAGE);
   const [open, setOpen] = useState(false);
   const [feedsOpen, setFeedsOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -258,6 +290,24 @@ export function CalendarTab() {
     return [...map.entries()];
   }, [visible]);
 
+  // A different person or range is a different question, so it is answered
+  // from the top rather than from however far the previous one was expanded.
+  // Done in the handlers rather than an effect: the reset belongs to the
+  // interaction, and deriving it from a render-phase comparison would be a
+  // roundabout way of saying the same thing.
+  function chooseRange(next: RangeId) {
+    setRange(next);
+    setVisibleDays(DAYS_PER_PAGE);
+  }
+
+  function choosePerson(next: PersonFilter) {
+    setPerson(next);
+    setVisibleDays(DAYS_PER_PAGE);
+  }
+
+  const shownDays = byDay.slice(0, visibleDays);
+  const hiddenDayCount = byDay.length - shownDays.length;
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!form.title.trim()) return;
@@ -281,15 +331,22 @@ export function CalendarTab() {
   const error = eventsError ?? entriesError;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-7">
       <ErrorNote message={error} />
 
       <TodayCard />
 
+      {/* Above the agenda rather than below it. The schedule has the stronger
+          claim on the fold, but a photo wall nobody scrolls to is a photo wall
+          nobody posts to — and posting is the half of this that only works if
+          people find it. */}
+      <PhotoWall />
+
       {/* ----------------------------------------------------------- header */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-xl font-semibold">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="rule-accent">
+          <p className="text-accent text-[11px] font-bold tracking-[0.14em] uppercase">Shared calendar</p>
+          <h2 className="mt-1 text-2xl font-bold tracking-tight">
             {activePerson ? `${activePerson.name}'s schedule` : "What's coming up"}
           </h2>
           <p className="text-faint mt-0.5 text-xs">
@@ -301,17 +358,19 @@ export function CalendarTab() {
         </div>
 
         <div className="flex items-center gap-2">
-          <div className="bg-sunk inline-flex rounded-xl p-1" role="group" aria-label="Range">
+          <div className="bg-sunk inline-flex rounded-xl p-1 shadow-inner" role="group" aria-label="Range">
             {RANGES.map((r) => (
               <button
                 key={r.id}
-                onClick={() => setRange(r.id)}
+                onClick={() => chooseRange(r.id)}
                 aria-pressed={range === r.id}
-                className={`rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                className={`rounded-lg px-2.5 py-1.5 text-xs font-medium whitespace-nowrap transition-colors ${
                   range === r.id ? "bg-surface text-ink shadow-sm" : "text-muted"
                 }`}
+                aria-label={`Show the next ${r.label}`}
               >
-                {r.label}
+                <span className="sm:hidden">{r.short}</span>
+                <span className="hidden sm:inline">{r.label}</span>
               </button>
             ))}
           </div>
@@ -323,15 +382,17 @@ export function CalendarTab() {
       </div>
 
       {/* -------------------------------------------------------- person tabs */}
-      <div
-        className="scroll-area -mx-1 flex gap-2 overflow-x-auto px-1 pb-1"
-        role="tablist"
-        aria-label="Whose schedule"
-      >
+      {/* Wraps rather than scrolling sideways. A horizontal scroller hid
+          members past the right edge on a phone — with five people the last
+          chip sat ~430px off-screen — and it was also making the whole
+          document horizontally scrollable, which dragged the fixed bottom nav
+          out of reach. Two short rows of chips cost a few pixels of height and
+          keep every member visible and tappable. */}
+      <div className="flex flex-wrap gap-2" role="tablist" aria-label="Whose schedule">
         <button
           role="tab"
           aria-selected={person === null}
-          onClick={() => setPerson(null)}
+          onClick={() => choosePerson(null)}
           className={`inline-flex shrink-0 items-center gap-2 rounded-full border px-3.5 py-2 text-sm font-medium transition-colors ${
             person === null
               ? "border-ink bg-ink text-on-ink"
@@ -350,7 +411,7 @@ export function CalendarTab() {
               key={m.id}
               role="tab"
               aria-selected={active}
-              onClick={() => setPerson(active ? null : m.id)}
+              onClick={() => choosePerson(active ? null : m.id)}
               className={`inline-flex shrink-0 items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
                 active ? "text-ink" : "border-line bg-surface text-muted hover:bg-sunk"
               }`}
@@ -387,7 +448,7 @@ export function CalendarTab() {
         </Card>
       ) : (
         <div className="space-y-4">
-          {byDay.map(([key, items]) => {
+          {shownDays.map(([key, items]) => {
             const date = parseDayKey(key);
             const today = isSameDay(date, new Date());
             return (
@@ -398,7 +459,7 @@ export function CalendarTab() {
               // on top of the first row instead of tracking the page.
               <section key={key}>
                 <div
-                  className={`bg-canvas/90 sticky top-14 z-10 flex items-baseline gap-2 px-2 py-2 backdrop-blur ${
+                  className={`bg-canvas/90 sticky top-14 z-10 flex items-baseline gap-2 px-2 py-2.5 backdrop-blur ${
                     today ? "text-accent" : ""
                   }`}
                 >
@@ -428,6 +489,23 @@ export function CalendarTab() {
               </section>
             );
           })}
+
+          {hiddenDayCount > 0 ? (
+            <button
+              onClick={() => setVisibleDays((n) => n + DAYS_PER_PAGE)}
+              className="border-line bg-surface text-ink hover:bg-sunk dashboard-card w-full rounded-2xl border py-3.5 text-sm font-semibold transition-colors"
+              // The two spans below sit flush in the accessibility tree
+              // ("Load more5 more days"), so the spoken name is set here.
+              aria-label={`Load more. ${hiddenDayCount} more ${
+                hiddenDayCount === 1 ? "day" : "days"
+              } with something scheduled.`}
+            >
+              Load more
+              <span className="text-muted ml-1.5 font-medium">
+                {hiddenDayCount} more {hiddenDayCount === 1 ? "day" : "days"}
+              </span>
+            </button>
+          ) : null}
         </div>
       )}
 

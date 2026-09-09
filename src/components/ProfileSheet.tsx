@@ -46,12 +46,12 @@ export function ProfileSheet({ open, onClose }: { open: boolean; onClose: () => 
     <Modal open={open} onClose={onClose} title="Profiles">
       <ErrorNote message={error} />
 
-      <div className="mb-5 flex flex-wrap gap-2">
+      <div className="mb-5 flex flex-wrap gap-2 rounded-2xl bg-sunk/55 p-2">
         {members.map((m) => (
           <button
             key={m.id}
             onClick={() => setEditingId(m.id)}
-            className={`flex items-center gap-2 rounded-full py-1 pr-3 pl-1 text-sm transition-colors ${
+            className={`flex min-h-10 items-center gap-2 rounded-full py-1 pr-3 pl-1 text-sm transition-colors ${
               target?.id === m.id ? "bg-sunk font-medium" : "hover:bg-sunk"
             }`}
           >
@@ -63,7 +63,7 @@ export function ProfileSheet({ open, onClose }: { open: boolean; onClose: () => 
 
       {target ? (
         <div className="space-y-5">
-          <div className="flex items-center gap-4">
+          <div className="border-line bg-surface-raised flex items-center gap-4 rounded-2xl border p-4">
             <Avatar member={target} size="lg" ring />
             <div className="flex flex-col gap-1.5">
               <input
@@ -116,7 +116,7 @@ export function ProfileSheet({ open, onClose }: { open: boolean; onClose: () => 
             />
           </Field>
 
-          <Field label="Colour" hint="Used for their calendar entries and chat bubbles.">
+          <Field label="Colour" hint="Used for calendar entries and chat bubbles.">
             <div className="flex flex-wrap gap-2">
               {MEMBER_COLORS.map((c) => (
                 <button

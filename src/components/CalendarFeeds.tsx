@@ -56,11 +56,11 @@ export function CalendarFeeds({
           {feeds.map((f) => {
             const member = f.member_id ? members.find((m) => m.id === f.member_id) : null;
             return (
-              <li key={f.id} className="border-line flex items-center gap-3 rounded-xl border p-3">
+              <li key={f.id} className="border-line bg-surface-raised flex items-center gap-3 rounded-2xl border p-3 shadow-sm">
                 <Avatar member={member ?? null} size="sm" />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium">{f.name}</p>
-                  <p className="text-faint truncate text-[11px]">
+                  <p className="text-faint truncate text-[11px] leading-relaxed">
                     {f.last_error
                       ? `Failed: ${f.last_error}`
                       : f.last_synced_at
@@ -105,12 +105,12 @@ export function CalendarFeeds({
         </p>
       )}
 
-      <div className="bg-sunk mb-4 inline-flex rounded-xl p-1">
+      <div className="bg-sunk mb-4 flex w-full rounded-xl p-1 sm:inline-flex sm:w-auto">
         {(["url", "paste"] as const).map((m) => (
           <button
             key={m}
             onClick={() => setMode(m)}
-            className={`rounded-lg px-3 py-1.5 text-xs font-medium ${
+            className={`flex-1 rounded-lg px-3 py-2 text-xs font-semibold transition-colors sm:flex-none ${
               mode === m ? "bg-surface text-ink shadow-sm" : "text-muted"
             }`}
           >
@@ -134,7 +134,7 @@ export function CalendarFeeds({
           </select>
         </Field>
 
-        <Field label="Label" hint="Optional — defaults to the person's name.">
+        <Field label="Label" hint="Optional. Defaults to the person's name.">
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -158,7 +158,7 @@ export function CalendarFeeds({
         ) : (
           <Field
             label="Paste the file contents"
-            hint="Open the .ics file in a text editor and paste everything. This is a one-off import — it won't refresh by itself."
+            hint="Open the .ics file in a text editor and paste everything. This is a one-off import and will not refresh by itself."
           >
             <textarea
               value={ics}

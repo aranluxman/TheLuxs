@@ -1,77 +1,130 @@
 @import "tailwindcss";
 
 /*
+ * ===========================================================================
+ *  Theme tokens
+ * ===========================================================================
+ *
  * Every colour in the app goes through one of these tokens. That is what makes
  * a theme switch a variable swap rather than a sweep through every component:
  * `bg-surface` resolves to `var(--color-surface)`, so redefining the variable
- * under `[data-theme="dark"]` re-skins the whole tree.
+ * under `[data-theme="emerald"]` re-skins the whole tree.
  *
- * Two tokens exist purely so that dark mode does not need per-component
- * overrides:
- *   --color-on-ink    text that sits on an ink-filled surface (buttons, my own
- *                     chat bubbles). White on light, near-black on dark.
- *   --color-danger-*  destructive affordances, which otherwise reach for
- *                     Tailwind's red-50/red-800 pair and glare in the dark.
+ * Two attributes drive the whole system, both stamped on <html>:
+ *
+ *   data-theme  the named palette — light | midnight | emerald | navy.
+ *               Absent means "nothing has decided yet", which only happens
+ *               with JavaScript off; the media query at the bottom of this
+ *               block covers that case.
+ *   data-mode   light | dark. Redundant with the theme id, and deliberately
+ *               so: `color-scheme` and the `dark:` variant both need to know
+ *               whether a palette is dark without enumerating which ids are.
+ *               Add a fifth theme and neither has to be touched.
+ *
+ * The token set, and what each one is for:
+ *
+ *   canvas          the page behind everything
+ *   surface         a card
+ *   surface-raised  a card that sits on top of another card
+ *   sunk            a well inside a card — hover rows, inert chips
+ *   ink             body text, and the fill of a primary button
+ *   on-ink          text that sits on an ink fill. Inverts with the mode.
+ *   muted / faint   secondary and tertiary text
+ *   line            hairline borders
+ *   accent          the theme's signature colour. Must stay legible as text
+ *                   on `surface`, because `text-accent` is a real thing.
+ *   accent-soft     a wash of the accent, for chip and badge backgrounds
+ *   success         a completed chore, a ticked item
+ *   danger*         destructive affordances
  */
+
 @theme {
-  /* Warm paper palette — this thing lives on a kitchen tablet, not a terminal. */
-  --color-canvas: #f6f4f0;
+  /* --------------------------------------------------- Clean Light (default)
+   * Near-white rather than the warm paper the dashboard started with: the
+   * brief asked for crisp typography on soft white with hairline grey
+   * borders, and a warm cream undertone fights the cooler accent themes when
+   * you flick between them.
+   */
+  --color-canvas: #f7f7f8;
   --color-surface: #ffffff;
-  --color-sunk: #efece6;
-  --color-ink: #1c1917;
+  --color-surface-raised: #ffffff;
+  --color-sunk: #f0f0f3;
+  --color-ink: #14151a;
   --color-on-ink: #ffffff;
-  --color-muted: #78716c;
-  --color-faint: #a8a29e;
-  --color-line: #e5e0d8;
-  --color-accent: #b45309;
+  --color-muted: #5f636d;
+  --color-faint: #9195a0;
+  --color-line: #e4e5e9;
+  --color-accent: #8a6216;
+  --color-accent-soft: #f6efe2;
+  --color-success: #2f7a55;
   --color-danger: #b91c1c;
   --color-danger-soft: #fef2f2;
 
-  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 }
 
 /*
- * `dark:` utilities, driven by the same attribute as the tokens below, so a
- * component can opt into a dark-only tweak without a media query.
+ * `dark:` utilities. Keyed on the mode rather than on a list of theme names,
+ * so every dark palette present and future gets them for free.
  */
-@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+@custom-variant dark (&:where([data-mode="dark"], [data-mode="dark"] *));
 
-/*
- * Dark palette. Warm-neutral rather than blue-grey, so it reads as the same
- * product with the lights off. Kept as one block and applied from two
- * selectors: the explicit choice, and the system default when the user has
- * not chosen. `:root:not([data-theme="light"])` is what stops the media query
- * from overriding someone who deliberately picked light.
+/* ------------------------------------------------------------- Midnight Dark
+ * Deep charcoal with gold. The accent is a muted antique gold rather than a
+ * bright yellow — the difference between a watch face and a highlighter.
  */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --color-canvas: #12100e;
-    --color-surface: #1c1a17;
-    --color-sunk: #262320;
-    --color-ink: #f5f2ec;
-    --color-on-ink: #12100e;
-    --color-muted: #a8a29e;
-    --color-faint: #78716c;
-    --color-line: #332f2a;
-    --color-accent: #f0b429;
-    --color-danger: #f87171;
-    --color-danger-soft: #2a1717;
-  }
-}
-
-:root[data-theme="dark"] {
-  --color-canvas: #12100e;
-  --color-surface: #1c1a17;
-  --color-sunk: #262320;
-  --color-ink: #f5f2ec;
-  --color-on-ink: #12100e;
-  --color-muted: #a8a29e;
-  --color-faint: #78716c;
-  --color-line: #332f2a;
-  --color-accent: #f0b429;
+:root[data-theme="midnight"] {
+  --color-canvas: #0e0e10;
+  --color-surface: #17171a;
+  --color-surface-raised: #1e1e22;
+  --color-sunk: #212126;
+  --color-ink: #f4f2ee;
+  --color-on-ink: #0e0e10;
+  --color-muted: #a3a3ad;
+  --color-faint: #75757f;
+  --color-line: #2b2b31;
+  --color-accent: #d9a441;
+  --color-accent-soft: #33270f;
+  --color-success: #82bd95;
   --color-danger: #f87171;
   --color-danger-soft: #2a1717;
+}
+
+/* ---------------------------------------------------------- Emerald Luxury */
+:root[data-theme="emerald"] {
+  --color-canvas: #08120e;
+  --color-surface: #0f1d17;
+  --color-surface-raised: #14261e;
+  --color-sunk: #16291f;
+  --color-ink: #eaf3ee;
+  --color-on-ink: #08120e;
+  --color-muted: #9db3a7;
+  --color-faint: #6f8579;
+  --color-line: #1f382c;
+  --color-accent: #4ecf95;
+  --color-accent-soft: #10281d;
+  --color-success: #6fd6a2;
+  --color-danger: #fb7185;
+  --color-danger-soft: #2c1519;
+}
+
+/* ------------------------------------------------------------- Navy Luxury */
+:root[data-theme="navy"] {
+  --color-canvas: #080d18;
+  --color-surface: #101827;
+  --color-surface-raised: #16202f;
+  --color-sunk: #18212f;
+  --color-ink: #e9eefb;
+  --color-muted: #9aa8c4;
+  --color-on-ink: #080d18;
+  --color-faint: #6c7b98;
+  --color-line: #223047;
+  --color-accent: #7ba7f5;
+  --color-accent-soft: #14203a;
+  --color-success: #7fd0a8;
+  --color-danger: #fb7185;
+  --color-danger-soft: #2a1620;
 }
 
 html {
@@ -82,18 +135,378 @@ html {
   color-scheme: light;
 }
 
+:root[data-mode="dark"] {
+  color-scheme: dark;
+}
+
+/*
+ * No-JavaScript fallback, and *only* that. The bootstrap script in `layout.tsx`
+ * stamps both attributes before first paint, so with scripting on this block
+ * never matches. It duplicates the Midnight palette on purpose: the
+ * alternative is a second selector on the block above, which would then also
+ * match once JS has run and re-introduce exactly the "system overrides an
+ * explicit choice" bug the `:not([data-theme])` guard exists to prevent.
+ */
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
+  :root:not([data-theme]) {
+    --color-canvas: #0e0e10;
+    --color-surface: #17171a;
+    --color-surface-raised: #1e1e22;
+    --color-sunk: #212126;
+    --color-ink: #f4f2ee;
+    --color-on-ink: #0e0e10;
+    --color-muted: #a3a3ad;
+    --color-faint: #75757f;
+    --color-line: #2b2b31;
+    --color-accent: #d9a441;
+    --color-accent-soft: #33270f;
+    --color-success: #82bd95;
+    --color-danger: #f87171;
+    --color-danger-soft: #2a1717;
     color-scheme: dark;
   }
 }
 
-:root[data-theme="dark"] {
-  color-scheme: dark;
+/*
+ * Nothing may scroll the page sideways. On a phone a single over-wide element
+ * does not just hide itself: it makes the whole document pannable, and the
+ * fixed bottom nav then sits off to one side where the last tab cannot be
+ * reached without dragging the page back.
+ *
+ * `clip` rather than `hidden` on purpose. `hidden` turns the element into a
+ * scroll container, which would become the nearest scrollport for the
+ * calendar's `sticky` day headings and stop them sticking. `clip` truncates
+ * without creating one, so sticky positioning is unaffected.
+ */
+html,
+body {
+  overflow-x: clip;
 }
 
 body {
   font-family: var(--font-sans);
+  min-height: 100%;
+  /*
+   * Two soft accent washes rather than a flat fill. On the dark themes this is
+   * most of what separates them from "black" — the tint pools in the corners
+   * and gives the page somewhere to recede to. Sized in rem so it scales with
+   * the viewport instead of tiling.
+   */
+  background:
+    radial-gradient(
+      circle at 0% 0%,
+      color-mix(in srgb, var(--color-accent) 9%, transparent),
+      transparent 28rem
+    ),
+    radial-gradient(
+      circle at 100% 0%,
+      color-mix(in srgb, var(--color-accent) 5%, transparent),
+      transparent 34rem
+    ),
+    var(--color-canvas);
+  background-attachment: fixed;
+}
+
+/*
+ * Theme changes are the one transition worth animating on the page root: the
+ * picker is a showcase feature, and an instant swap reads as a flicker rather
+ * than a choice. Scoped to colours so nothing else inherits a lag.
+ */
+body,
+.dashboard-card,
+.app-header {
+  transition:
+    background-color 260ms ease,
+    border-color 260ms ease,
+    box-shadow 220ms ease,
+    color 260ms ease;
+}
+
+button,
+a,
+input,
+textarea,
+select {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button {
+  touch-action: manipulation;
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--color-accent) 48%, transparent);
+  outline-offset: 2px;
+}
+
+/* ------------------------------------------------------------------ header */
+
+.app-header {
+  background: color-mix(in srgb, var(--color-canvas) 82%, transparent);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--color-line) 80%, transparent);
+}
+
+.brand-lockup {
+  min-width: max-content;
+}
+
+.brand-mark {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border-radius: 0.625rem;
+  /* A thin gold rule under the monogram — the one place the accent is allowed
+     to be pure decoration, because it is the brand. */
+  background:
+    linear-gradient(
+      160deg,
+      color-mix(in srgb, var(--color-accent) 28%, var(--color-ink)),
+      var(--color-ink)
+    );
+  color: var(--color-on-ink);
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+}
+
+/* ------------------------------------------------------------------- cards */
+
+.dashboard-main {
+  animation: page-enter 360ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.dashboard-card {
+  box-shadow: 0 10px 28px color-mix(in srgb, var(--color-ink) 6%, transparent);
+}
+
+.dashboard-card:hover {
+  border-color: color-mix(in srgb, var(--color-accent) 24%, var(--color-line));
+  box-shadow: 0 16px 40px color-mix(in srgb, var(--color-ink) 10%, transparent);
+}
+
+/*
+ * Glassmorphism, applied where there is actually something behind the panel to
+ * blur — the header, the tab bar, and cards laid over the accent wash. A blur
+ * over a flat fill costs a compositor layer and buys nothing, so it is opt-in
+ * rather than a property of every card.
+ */
+.glass-panel {
+  background: color-mix(in srgb, var(--color-surface) 72%, transparent);
+  backdrop-filter: blur(16px) saturate(1.4);
+  -webkit-backdrop-filter: blur(16px) saturate(1.4);
+}
+
+/* A gentle rise, for anything that behaves like a tile you can press. */
+.tile-lift {
+  transition:
+    transform 220ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 220ms ease,
+    border-color 220ms ease;
+}
+
+.tile-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 18px 38px color-mix(in srgb, var(--color-ink) 12%, transparent);
+}
+
+.today-card {
+  position: relative;
+  overflow: hidden;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--color-accent) 12%, var(--color-surface)) 0%,
+      var(--color-surface) 52%
+    ),
+    var(--color-surface);
+}
+
+.today-card::after {
+  position: absolute;
+  top: -4rem;
+  right: -3rem;
+  width: 12rem;
+  height: 12rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  content: "";
+  pointer-events: none;
+}
+
+/* A hairline gold rule above a section heading — the Rolex-grid device. */
+.rule-accent::before {
+  display: block;
+  width: 2.25rem;
+  height: 2px;
+  margin-bottom: 0.625rem;
+  border-radius: 999px;
+  background: var(--color-accent);
+  content: "";
+}
+
+/* ------------------------------------------------------------ theme picker */
+
+.theme-swatch {
+  display: inline-grid;
+  grid-auto-flow: column;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid color-mix(in srgb, var(--color-line) 90%, transparent);
+  border-radius: 999px;
+}
+
+.theme-swatch > span {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 999px;
+  /* Without this the near-black canvas dot of a dark theme disappears into a
+     dark menu, and the swatch reads as two colours rather than three. */
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-ink) 22%, transparent);
+}
+
+.theme-menu {
+  animation: picker-in 160ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  transform-origin: top right;
+}
+
+/* -------------------------------------------------------------- chore board */
+
+/*
+ * The accent bar down the left edge of a chore card. Its colour is set inline
+ * from the assignee's own colour, so the rule here only owns the geometry.
+ */
+.chore-card::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 3px;
+  border-radius: 999px 0 0 999px;
+  background: var(--chore-hue, var(--color-accent));
+  content: "";
+}
+
+.chore-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.chore-card[data-done="true"] {
+  background: color-mix(in srgb, var(--color-success) 8%, var(--color-surface));
+  border-color: color-mix(in srgb, var(--color-success) 28%, var(--color-line));
+}
+
+/* ------------------------------------------------------------- photo wall */
+
+.photo-tile img {
+  transition: transform 420ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.photo-tile:hover img {
+  transform: scale(1.04);
+}
+
+/* ------------------------------------------------------------------- chat */
+
+.chat-panel {
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--color-surface) 60%, transparent),
+    0 14px 36px color-mix(in srgb, var(--color-ink) 8%, transparent);
+}
+
+.chat-bubble {
+  animation: bubble-in 240ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.reaction-picker {
+  animation: picker-in 160ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  transform-origin: bottom center;
+}
+
+.reaction-pill {
+  animation: reaction-in 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.mobile-nav {
+  box-shadow: 0 -8px 28px color-mix(in srgb, var(--color-ink) 8%, transparent);
+}
+
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--color-sunk);
+}
+
+.skeleton::after {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--color-surface) 70%, transparent),
+    transparent
+  );
+  content: "";
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes page-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes bubble-in {
+  from { opacity: 0; transform: translateY(5px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes picker-in {
+  from { opacity: 0; transform: translateY(4px) scale(0.94); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes reaction-in {
+  from { opacity: 0; transform: scale(0.75); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes skeleton-shimmer {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(100%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-main,
+  .chat-bubble,
+  .reaction-picker,
+  .reaction-pill,
+  .theme-menu,
+  .skeleton::after {
+    animation: none;
+  }
+
+  .tile-lift:hover,
+  .photo-tile:hover img {
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .app-header,
+  .glass-panel {
+    background: var(--color-canvas);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
 }
 
 /* Keep the chat scroller from bouncing the whole page on iOS. */

@@ -22,7 +22,7 @@
 --  every row in this table — direct messages included. The privacy here is the
 --  same kind the app already claims for "delete your own messages": a filter
 --  in the query, honest about accidents and ordinary use, not about an
---  adversary. Migration 0004's PART 3 is still the fix, and adding DMs makes
+--  adversary. Migration 0005's PART 3 is still the fix, and adding DMs makes
 --  it more urgent rather than less. See the README's Security model section,
 --  which says this in the same words.
 --
@@ -37,7 +37,7 @@
 -- 1. The recipient.
 --
 --    `on delete cascade` matches sender_id. Removing a member from a browser
---    is already revoked (0004 §1.3), so this cannot be reached by the app.
+--    is already revoked (0005 §1.3), so this cannot be reached by the app.
 -- ----------------------------------------------------------------------------
 alter table public.family_messages
   add column if not exists recipient_id uuid
@@ -118,8 +118,8 @@ create index if not exists family_messages_dm_idx
 -- ----------------------------------------------------------------------------
 -- 4. Sending.
 --
---    0004 dropped its family_reset_policy() helper on its last line, so this
---    drops the policy directly, the way 0005 does.
+--    0005 dropped its family_reset_policy() helper on its last line, so this
+--    drops the policy directly, the way 0011 does.
 --
 --    A message addressed to its own sender is a client bug, never an intent.
 -- ----------------------------------------------------------------------------
@@ -141,7 +141,7 @@ create policy family_messages_send on public.family_messages
 -- ----------------------------------------------------------------------------
 -- 5. The recipient is immutable.
 --
---    0004's column-scoped UPDATE grant already covers this — a column added
+--    0005's column-scoped UPDATE grant already covers this — a column added
 --    after that grant is not granted to anyone, so `recipient_id` is not
 --    writable from a browser at all, and `conversation_key` is generated and
 --    never writable by anybody. This is the belt to that pair of braces: a
@@ -149,7 +149,7 @@ create policy family_messages_send on public.family_messages
 --    still cannot move a message from one conversation into another.
 --
 --    Replacing the whole function is the only way to add a check to it; the
---    body below is 0004's, plus the recipient_id clause. If 0004 ever changes,
+--    body below is 0005's, plus the recipient_id clause. If 0005 ever changes,
 --    this has to be re-synced by hand — there is no way to patch a function
 --    body in place, and pretending otherwise is how the two silently diverge.
 -- ----------------------------------------------------------------------------
@@ -169,7 +169,7 @@ begin
     raise exception 'family_messages.created_at is immutable';
   end if;
 
-  -- Added in 0006. A message cannot be moved between conversations: a DM
+  -- Added in 0012. A message cannot be moved between conversations: a DM
   -- cannot be promoted into the group thread, and a group message cannot be
   -- retargeted at one person. conversation_key follows this column, so
   -- pinning it pins both.
@@ -194,7 +194,7 @@ begin
     -- auth, because it compares two columns of the row rather than trusting a
     -- caller-supplied identity: the tombstone must be attributed to the person
     -- who sent it. A determined attacker can still claim to be that person —
-    -- see 0004 PART 3 — but no ordinary or buggy client can delete someone
+    -- see 0005 PART 3 — but no ordinary or buggy client can delete someone
     -- else's. Legacy rows with no sender are exempt; there is nobody to match.
     if old.sender_id is not null and new.deleted_by is distinct from old.sender_id then
       raise exception 'a message may only be deleted by its sender';

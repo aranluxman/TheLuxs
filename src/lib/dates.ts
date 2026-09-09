@@ -32,9 +32,31 @@ export function startOfWeekMon(d: Date): Date {
   return startOfWeek(d, WEEK_OPTS);
 }
 
+/**
+ * ISO week key — `2026-W35`. The chore board buckets a weekly job by this, so
+ * "vacuumed on Saturday" and "vacuumed on Sunday" are the same tick.
+ *
+ * `RRRR` rather than `yyyy` on purpose: the ISO week-numbering year, which is
+ * what stops 1 January landing in week 53 of a year it does not belong to.
+ */
+export function weekKey(d: Date = new Date()): string {
+  return format(d, "RRRR-'W'II");
+}
+
 export function weekDays(anchor: Date): Date[] {
   const start = startOfWeekMon(anchor);
   return eachDayOfInterval({ start, end: addDays(start, 6) });
+}
+
+/**
+ * The seven `YYYY-MM-DD` keys of the week containing `anchor`, Monday first.
+ *
+ * The chore board loads exactly these plus the week key: a daily chore's ticks
+ * are filed per day, so a week's worth of points cannot be read without naming
+ * all seven days.
+ */
+export function weekDayKeys(anchor: Date = new Date()): string[] {
+  return weekDays(anchor).map(dayKey);
 }
 
 /** The 5- or 6-row grid a month view needs, padded out to whole weeks. */

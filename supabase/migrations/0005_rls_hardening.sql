@@ -22,8 +22,9 @@
 --             checks itself, and invariants over a row's own columns.
 --
 --    PART 2 — INTEGRITY. Per-command RLS policies replacing the blanket
---             `using (true) with check (true)`. These stop malformed and
---             buggy writes. They are not an authorization boundary.
+--             `using (true) with check (true)` that every earlier round
+--             installed. These stop malformed and buggy writes. They are
+--             not an authorization boundary.
 --
 --    PART 3 — The identity check that is *asked for* but cannot work yet,
 --             written out so it is ready the day auth lands.
@@ -233,7 +234,7 @@ begin
     'family_quotes', 'family_looking_forward', 'family_calendar_feeds'
   ] loop
     execute format('alter table public.%I enable row level security', t);
-    -- The blanket policy from rounds 1 and 2.
+    -- The blanket policy from rounds 1-3.
     execute format('drop policy if exists %I on public.%I', t || '_family_access', t);
   end loop;
 end $$;

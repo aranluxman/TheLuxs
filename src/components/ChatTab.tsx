@@ -186,27 +186,27 @@ function ReactionPills({
             aria-label={`${s.emoji}, ${s.memberIds.length} ${
               s.memberIds.length === 1 ? "person" : "people"
             }${s.mine ? ", including you" : ""}. Toggle your reaction.`}
-            className={`inline-flex items-center gap-1 rounded-full border py-0.5 pr-1.5 pl-1.5 text-[11px] transition-colors ${
+            className={`reaction-pill inline-flex items-center gap-1 rounded-full border py-0.5 pr-1.5 pl-1.5 text-[11px] transition-[background-color,border-color,transform] ${
               s.mine
                 ? "border-accent bg-accent/12 text-ink font-semibold"
                 : "border-line bg-surface text-muted hover:bg-sunk"
             }`}
           >
-            <span aria-hidden>{s.emoji}</span>
-            {/* Faces beat a bare number in a five-person house — you can see at
-                a glance whether the person you care about laughed. */}
+            <span className="text-[13px] leading-none" aria-hidden>{s.emoji}</span>
+            {/* Faces answer "who", the number answers "how many". Two faces and
+                the digit 2 are not redundant at a glance — the digit is what
+                scans, the faces are what you actually care about. Capped at two
+                so a five-person pile-up cannot outgrow the bubble. */}
             <span className="flex -space-x-1.5" aria-hidden>
-              {people.slice(0, 3).map((p) => (
+              {people.slice(0, 2).map((p) => (
                 <span key={p.id} className="ring-surface rounded-full ring-2">
                   <Avatar member={p} size="xs" />
                 </span>
               ))}
             </span>
-            {people.length > 3 ? (
-              <span className="tabular-nums" aria-hidden>
-                +{people.length - 3}
-              </span>
-            ) : null}
+            <span className="min-w-[0.75rem] text-center tabular-nums" aria-hidden>
+              {s.memberIds.length}
+            </span>
           </button>
         );
       })}
@@ -227,7 +227,7 @@ function ReactionPicker({
   const mineFor = (emoji: ReactionEmoji) => summaries.some((s) => s.emoji === emoji && s.mine);
 
   return (
-    <div className="border-line bg-surface flex items-center gap-0.5 rounded-full border p-1 shadow-lg">
+    <div className="reaction-picker border-line bg-surface flex items-center gap-0.5 rounded-full border p-1 shadow-lg">
       {REACTION_EMOJI.map((emoji) => (
         <button
           key={emoji}
@@ -405,10 +405,12 @@ export function ChatTab() {
     pinnedToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
   }
 
+  // Re-pin on anything that changes the thread's height: a new message, and
+  // the reaction pills that arrive on a later tick.
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (el && pinnedToBottom.current) el.scrollTop = el.scrollHeight;
-  }, [rows.length]);
+  }, [rows.length, reactions.count]);
 
   useEffect(() => {
     if (!loading && scrollRef.current) {
@@ -555,10 +557,14 @@ export function ChatTab() {
       <div
         ref={scrollRef}
         onScroll={onScroll}
-        className="scroll-area border-line bg-surface flex-1 overflow-y-auto rounded-3xl border px-3 py-4 sm:px-4"
+        className="chat-panel scroll-area border-line bg-surface flex-1 overflow-y-auto rounded-3xl border px-3 pt-4 pb-7 sm:px-5 sm:pt-5 sm:pb-8"
       >
         {loading ? (
-          <p className="text-muted py-8 text-center text-sm">Loading messages…</p>
+          <div className="space-y-3 py-4" aria-label="Loading messages" role="status">
+            <span className="skeleton block h-12 w-3/4 rounded-2xl" />
+            <span className="skeleton ml-auto block h-10 w-1/2 rounded-2xl" />
+            <span className="skeleton block h-16 w-2/3 rounded-2xl" />
+          </div>
         ) : rows.length === 0 ? (
           <div className="text-muted flex h-full flex-col items-center justify-center gap-2 text-center">
             {other ? (
@@ -665,7 +671,7 @@ export function ChatTab() {
                               e.preventDefault();
                               setActiveId(isActive ? null : r.message.id);
                             }}
-                            className={`cursor-pointer space-y-1.5 px-3.5 py-2 text-sm break-words whitespace-pre-wrap shadow-sm transition-shadow hover:shadow-md ${
+                            className={`chat-bubble cursor-pointer space-y-1.5 px-3.5 py-2.5 text-sm break-words whitespace-pre-wrap shadow-sm transition-[box-shadow,transform] hover:-translate-y-px hover:shadow-md ${
                               r.mine ? "bg-ink text-on-ink" : "text-ink"
                             } ${isActive ? "ring-accent/45 ring-2" : ""}`}
                             style={{
@@ -725,7 +731,7 @@ export function ChatTab() {
 
       {/* ------------------------------------------------------- composer */}
       {recorder.recording ? (
-        <div className="border-line bg-surface mt-3 flex items-center gap-3 rounded-2xl border px-4 py-3">
+        <div className="chat-composer border-line bg-surface mt-3 flex items-center gap-3 rounded-2xl border px-4 py-3 shadow-sm">
           <span
             className="bg-danger h-2.5 w-2.5 animate-pulse rounded-full"
             aria-hidden
@@ -749,7 +755,7 @@ export function ChatTab() {
           </button>
         </div>
       ) : (
-        <form onSubmit={submitText} className="mt-3 flex items-end gap-2">
+        <form onSubmit={submitText} className="chat-composer mt-3 flex items-end gap-2">
           <input
             ref={fileInputRef}
             type="file"
@@ -790,7 +796,7 @@ export function ChatTab() {
                   : `Message as ${currentMember.name}…`)
             }
             disabled={!canSend}
-            className="border-line bg-surface text-ink placeholder:text-faint focus:border-ink max-h-32 min-h-[2.75rem] flex-1 resize-none rounded-2xl border px-4 py-3 text-sm focus:outline-none disabled:opacity-60"
+            className="border-line bg-surface text-ink placeholder:text-faint focus:border-accent focus:ring-accent/20 max-h-32 min-h-[2.75rem] flex-1 resize-none rounded-2xl border px-4 py-3 text-sm shadow-sm focus:outline-none focus:ring-4 disabled:opacity-60"
           />
 
           {draft.trim() ? (

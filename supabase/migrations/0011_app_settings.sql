@@ -10,7 +10,7 @@
 --  the browser, so it is per-device instead of shared — but the icon does not
 --  travel until this has been run.
 --
---  Same honesty as 0004: there is no login, so these policies constrain the
+--  Same honesty as 0005: there is no login, so these policies constrain the
 --  *shape* of what can be written, never who writes it.
 --
 --  Idempotent: safe to re-run.

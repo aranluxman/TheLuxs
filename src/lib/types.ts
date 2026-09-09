@@ -131,6 +131,19 @@ export interface ReactionSummary {
   mine: boolean;
 }
 
+/** One line on the shared shopping list. */
+export interface ShoppingItem {
+  id: string;
+  name: string;
+  /** Free text: "2 boxes", "the big one". Never a number. */
+  note: string | null;
+  added_by: string | null;
+  created_at: string;
+  /** Null means still to buy. Set means done — that is the whole state. */
+  completed_at: string | null;
+  completed_by: string | null;
+}
+
 export interface Quote {
   id: string;
   quote_text: string;
@@ -181,4 +194,33 @@ export interface AgendaItem {
   allDay?: boolean;
   /** Imported from a calendar feed — deleting it here would just resync back. */
   readOnly?: boolean;
+}
+
+/**
+ * One chore, ticked off for one period. The chore itself is defined in
+ * `lib/chores.ts` — this row only records that it happened, so the roster can
+ * be reworded without touching history.
+ *
+ * `period_key` is a local day (`2026-08-24`) for daily chores and an ISO week
+ * (`2026-W35`) for weekly ones. Which of the two a chore uses comes from its
+ * cadence, so the key is derived on the client rather than stored per row.
+ */
+export interface ChoreTick {
+  chore_key: string;
+  period_key: string;
+  done_by: string | null;
+  done_at: string;
+}
+
+/** A photo on the family wall, plus the short-lived signed URL for it. */
+export interface FamilyPhoto {
+  id: string;
+  storage_path: string;
+  caption: string | null;
+  uploaded_by: string | null;
+  created_at: string;
+}
+
+export interface PhotoWithUrl extends FamilyPhoto {
+  url: string | null;
 }
