@@ -415,6 +415,186 @@ select:focus-visible {
   transform: scale(1.04);
 }
 
+/* ---------------------------------------------------------------- photos */
+
+/*
+ * The wall was a grid of every photo at once, which flattens them: six thumbnails
+ * the size of a postage stamp is a contact sheet, not something you look at. The
+ * carousel shows one at a time, large, and moves on by itself — so the card
+ * becomes something the kitchen tablet cycles through rather than a static block.
+ */
+
+.photo-carousel {
+  position: relative;
+  overflow: hidden;
+  border-radius: 0.75rem;
+  background: var(--color-sunk);
+}
+
+.photo-carousel-slide {
+  animation: photo-fade 700ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* A gradient scrim rather than a solid bar: the caption has to stay readable
+   over a photo whose bottom edge could be any colour at all. */
+.photo-carousel-scrim {
+  background: linear-gradient(to top, rgb(0 0 0 / 0.72) 0%, rgb(0 0 0 / 0.35) 45%, transparent 100%);
+}
+
+.photo-dot {
+  height: 0.375rem;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.45);
+  transition:
+    width 320ms cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 320ms ease;
+  width: 0.375rem;
+}
+
+.photo-dot[data-active="true"] {
+  width: 1.25rem;
+  background: #fff;
+}
+
+@keyframes photo-fade {
+  from {
+    opacity: 0;
+    transform: scale(1.03);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* --------------------------------------------------------------- shopping */
+
+/*
+ * Ticking something off should feel like something. A native checkbox gives
+ * you a state change and nothing else, which on a list you clear every week is
+ * a missed opportunity — this is the one moment in the app where the reward is
+ * the point.
+ *
+ * The tick is drawn rather than typed: two stroked segments of one path, with
+ * `stroke-dashoffset` run from "fully hidden" to "fully shown", so it draws on
+ * in the direction a hand would write it.
+ */
+
+.tick-box {
+  position: relative;
+  display: grid;
+  width: 1.5rem;
+  height: 1.5rem;
+  flex-shrink: 0;
+  place-items: center;
+  border: 2px solid var(--color-line);
+  border-radius: 0.5rem;
+  background: var(--color-surface);
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.tick-row:hover .tick-box {
+  border-color: color-mix(in srgb, var(--color-accent) 55%, var(--color-line));
+}
+
+.tick-box[data-done="true"] {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  /* The overshoot is what reads as "satisfying" rather than merely "changed". */
+  animation: tick-pop 320ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.tick-box svg {
+  width: 0.875rem;
+  height: 0.875rem;
+  stroke: var(--color-on-ink);
+  stroke-width: 3.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+}
+
+.tick-box path {
+  stroke-dasharray: 20;
+  stroke-dashoffset: 20;
+}
+
+.tick-box[data-done="true"] path {
+  animation: tick-draw 260ms 60ms cubic-bezier(0.65, 0, 0.35, 1) forwards;
+}
+
+/* A ring that expands and fades from under the box, like a dropped pebble. */
+.tick-box[data-done="true"]::after {
+  position: absolute;
+  border-radius: 0.75rem;
+  content: "";
+  inset: -0.25rem;
+  border: 2px solid var(--color-accent);
+  animation: tick-ripple 480ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* The label follows the box: struck through, dimmed, and nudged a little as if
+   it has been settled and set aside. */
+.tick-label {
+  transition:
+    color 220ms ease,
+    opacity 220ms ease,
+    transform 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.tick-row[data-done="true"] .tick-label {
+  transform: translateX(0.125rem);
+}
+
+/* The whole list clearing is worth more than one item, so it gets its own
+   moment rather than just an empty state appearing. */
+.tick-cleared {
+  animation: tick-cleared-in 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes tick-pop {
+  0% {
+    transform: scale(1);
+  }
+  45% {
+    transform: scale(1.22);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes tick-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes tick-ripple {
+  0% {
+    opacity: 0.55;
+    transform: scale(0.8);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.5);
+  }
+}
+
+@keyframes tick-cleared-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.5rem) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 /* ------------------------------------------------------------------- chat */
 
 .chat-panel {
@@ -490,8 +670,19 @@ select:focus-visible {
   .reaction-picker,
   .reaction-pill,
   .theme-menu,
-  .skeleton::after {
+  .skeleton::after,
+  .tick-cleared,
+  .tick-box[data-done="true"],
+  .tick-box[data-done="true"]::after,
+  .photo-carousel-slide {
     animation: none;
+  }
+
+  /* Without the draw animation the tick would never appear at all, so it is
+     shown outright rather than suppressed. */
+  .tick-box[data-done="true"] path {
+    animation: none;
+    stroke-dashoffset: 0;
   }
 
   .tile-lift:hover,

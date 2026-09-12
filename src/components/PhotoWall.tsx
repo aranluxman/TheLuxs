@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usePhotos } from "@/hooks/usePhotos";
 import { format, parseISO } from "@/lib/dates";
 import type { PhotoWithUrl } from "@/lib/types";
@@ -96,6 +96,148 @@ function Lightbox({
         </div>
       </div>
     </div>
+  );
+}
+
+/* ---------------------------------------------------------------- carousel */
+
+/** How long each photo holds before the next one comes up. */
+const SLIDE_MS = 5000;
+
+/**
+ * One photo at a time, advancing on its own.
+ *
+ * It pauses whenever someone is actually looking — pointer over it, keyboard
+ * focus inside it, or the tab in the background — because a photo sliding away
+ * mid-look is worse than no rotation at all. `prefers-reduced-motion` stops the
+ * automatic advance entirely rather than merely removing the fade: for that
+ * reader the movement *is* the problem, and the arrows still work.
+ */
+function Carousel({
+  photos,
+  onOpen,
+}: {
+  photos: PhotoWithUrl[];
+  onOpen: (p: PhotoWithUrl) => void;
+}) {
+  const { byId } = useFamily();
+  const [index, setIndex] = useState(0);
+  const [paused, setPaused] = useState(false);
+
+  // A photo removed from under us must not leave the index out past the end.
+  const safeIndex = photos.length ? index % photos.length : 0;
+  const photo = photos[safeIndex];
+
+  const go = useCallback(
+    (delta: number) =>
+      setIndex((i) => (photos.length ? (i + delta + photos.length) % photos.length : 0)),
+    [photos.length],
+  );
+
+  useEffect(() => {
+    if (paused || photos.length < 2) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+    const id = window.setInterval(() => {
+      // Advancing a carousel nobody can see just burns signed-URL lifetime.
+      if (document.visibilityState === "visible") setIndex((i) => i + 1);
+    }, SLIDE_MS);
+    return () => window.clearInterval(id);
+  }, [paused, photos.length]);
+
+  if (!photo) return null;
+
+  const uploader = photo.uploaded_by ? byId[photo.uploaded_by] : null;
+
+  return (
+    <div
+      className="photo-carousel aspect-[4/3] w-full sm:aspect-[16/9]"
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+      onFocusCapture={() => setPaused(true)}
+      onBlurCapture={() => setPaused(false)}
+      role="region"
+      aria-roledescription="carousel"
+      aria-label={`Family photos, ${safeIndex + 1} of ${photos.length}`}
+    >
+      {/* Keyed on the photo id so React remounts on every change and the fade
+          replays — without it the element persists and the animation runs once. */}
+      <button
+        key={photo.id}
+        type="button"
+        onClick={() => onOpen(photo)}
+        className="photo-carousel-slide absolute inset-0 block h-full w-full"
+        aria-label={photo.caption ? `Open: ${photo.caption}` : "Open this photo"}
+      >
+        {photo.url ? (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img
+            src={photo.url}
+            alt={photo.caption ?? "Family photo"}
+            className="h-full w-full object-cover"
+            decoding="async"
+          />
+        ) : (
+          <span className="skeleton block h-full w-full" />
+        )}
+      </button>
+
+      {/* Sits above the slide, but only over the bottom strip, so most of the
+          photo stays clickable. */}
+      <div className="photo-carousel-scrim pointer-events-none absolute inset-x-0 bottom-0 flex items-end gap-3 p-3 sm:p-4">
+        <div className="min-w-0 flex-1">
+          {photo.caption ? (
+            <p className="truncate text-sm font-medium text-white">{photo.caption}</p>
+          ) : null}
+          <p className="truncate text-xs text-white/70">
+            {uploader ? `${uploader.name} · ` : ""}
+            {format(parseISO(photo.created_at), "MMM d")}
+          </p>
+        </div>
+
+        {photos.length > 1 ? (
+          <div className="flex shrink-0 items-center gap-1.5" aria-hidden>
+            {/* Capped: forty photos would otherwise become forty dots. */}
+            {photos.slice(0, 8).map((p, i) => (
+              <span key={p.id} className="photo-dot" data-active={i === safeIndex} />
+            ))}
+            {photos.length > 8 ? (
+              <span className="ml-0.5 text-[10px] font-semibold text-white/70 tabular-nums">
+                {safeIndex + 1}/{photos.length}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+
+      {photos.length > 1 ? (
+        <>
+          <CarouselArrow side="left" onClick={() => go(-1)} />
+          <CarouselArrow side="right" onClick={() => go(1)} />
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function CarouselArrow({
+  side,
+  onClick,
+}: {
+  side: "left" | "right";
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={side === "left" ? "Previous photo" : "Next photo"}
+      className={`absolute top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-full bg-black/35 text-lg leading-none text-white backdrop-blur-sm transition-colors hover:bg-black/55 ${
+        side === "left" ? "left-2" : "right-2"
+      }`}
+    >
+      {side === "left" ? "\u2039" : "\u203a"}
+    </button>
   );
 }
 
@@ -199,30 +341,7 @@ export function PhotoWall() {
             </Button>
           </div>
         ) : (
-          <ul className="grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-6">
-            {photos.map((p) => (
-              <li key={p.id}>
-                <button
-                  onClick={() => setOpen(p)}
-                  className="photo-tile bg-sunk block aspect-square w-full overflow-hidden rounded-lg"
-                  title={p.caption ?? "Open photo"}
-                >
-                  {p.url ? (
-                    /* eslint-disable-next-line @next/next/no-img-element */
-                    <img
-                      src={p.url}
-                      alt={p.caption ?? "Family photo"}
-                      className="h-full w-full object-cover"
-                      loading="lazy"
-                      decoding="async"
-                    />
-                  ) : (
-                    <span className="skeleton block h-full w-full" />
-                  )}
-                </button>
-              </li>
-            ))}
-          </ul>
+          <Carousel photos={photos} onOpen={setOpen} />
         )}
       </Card>
 
