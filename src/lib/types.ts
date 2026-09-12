@@ -194,6 +194,21 @@ export interface AgendaItem {
   allDay?: boolean;
   /** Imported from a calendar feed — deleting it here would just resync back. */
   readOnly?: boolean;
+
+  /*
+   * Everything below exists only for the detail sheet. The agenda row is a
+   * one-line summary and deliberately shows none of it — but a row that can be
+   * opened has to carry what opening it reveals, and the alternative (looking
+   * the source row back up by id) would mean the sheet re-deriving the join
+   * `buildAgenda` already did.
+   */
+
+  /** Entries only. `general` is treated as "uncategorised" and not shown. */
+  category?: string | null;
+  /** Events only. */
+  location?: string | null;
+  /** Events only — never surfaced anywhere in the UI before the detail sheet. */
+  description?: string | null;
 }
 
 /**

@@ -82,6 +82,8 @@ function buildAgenda(
       end: null,
       // Fall back to the poster so the dot still has a colour before any RSVP.
       memberIds: going.length ? going : e.created_by ? [e.created_by] : [],
+      location: e.location,
+      description: e.description,
     });
   }
 
@@ -99,6 +101,7 @@ function buildAgenda(
       memberIds: c.member_id ? [c.member_id] : [],
       allDay: c.all_day,
       readOnly: Boolean(c.source_feed_id),
+      category: c.category,
     });
   }
 
@@ -124,6 +127,156 @@ function belongsTo(item: AgendaItem, person: PersonFilter): boolean {
   return item.kind === "event" && item.memberIds.length === 0;
 }
 
+/* ---------------------------------------------------------- Detail sheet */
+
+/** "1h 15m", "45m", "2h" — omitted entirely when there is no end time. */
+function formatSpan(start: Date, end: Date): string | null {
+  const minutes = Math.round((end.getTime() - start.getTime()) / 60000);
+  if (minutes <= 0) return null;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (!h) return `${m}m`;
+  return m ? `${h}h ${m}m` : `${h}h`;
+}
+
+/** One labelled line. Renders nothing at all when there is no value. */
+function DetailRow({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  if (children === null || children === undefined || children === "") return null;
+  return (
+    <div className="border-line/70 flex gap-3 border-t py-2.5 first:border-t-0 first:pt-0">
+      <span className="text-faint w-20 shrink-0 text-xs font-semibold tracking-wide uppercase">
+        {label}
+      </span>
+      <div className="min-w-0 flex-1 text-sm">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * Everything the agenda row had to leave out.
+ *
+ * The row is one line on a phone, so it truncates the title and drops the date,
+ * the duration, the category in words and — for a posted event — the location
+ * and notes, which had no home anywhere in the app after the Events tab was
+ * removed. Tapping a row is now the way to see any of it.
+ */
+function EventDetailSheet({
+  item,
+  onClose,
+  onDelete,
+}: {
+  item: AgendaItem | null;
+  onClose: () => void;
+  onDelete: (() => void) | null;
+}) {
+  const { byId } = useFamily();
+  if (!item) return null;
+
+  const owners = item.memberIds.map((id) => byId[id]).filter(Boolean);
+  const glyph = rowGlyph(item);
+  const day = parseDayKey(item.day);
+  const span = item.start && item.end ? formatSpan(item.start, item.end) : null;
+
+  return (
+    <Modal open onClose={onClose} title="Event details">
+      <div className="flex items-start gap-2.5">
+        <span
+          className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg text-base"
+          style={{ backgroundColor: tint(glyph.hue, 0.16) }}
+          aria-hidden
+        >
+          {glyph.icon}
+        </span>
+        {/* Wraps rather than truncating — seeing the whole title is half the
+            reason for opening this at all. */}
+        <h3 className="min-w-0 flex-1 text-base leading-snug font-semibold">{item.title}</h3>
+      </div>
+
+      <div className="mt-4">
+        <DetailRow label="When">
+          <p className="font-medium">{format(day, "EEEE, d MMMM yyyy")}</p>
+          <p className="text-muted mt-0.5">
+            {item.start ? (
+              <>
+                {formatTime(item.start)}
+                {item.end ? ` – ${formatTime(item.end)}` : null}
+                {span ? <span className="text-faint"> · {span}</span> : null}
+              </>
+            ) : (
+              "All day"
+            )}
+          </p>
+        </DetailRow>
+
+        <DetailRow label="Type">
+          <span className="inline-flex items-center gap-1.5">
+            <span aria-hidden>{glyph.icon}</span>
+            {glyph.label}
+          </span>
+        </DetailRow>
+
+        <DetailRow label={owners.length > 1 ? "Who" : "Whose"}>
+          {owners.length ? (
+            <span className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+              {owners.map((o) => (
+                <span key={o.id} className="inline-flex items-center gap-1.5">
+                  <Avatar member={o} size="sm" />
+                  {o.name}
+                </span>
+              ))}
+            </span>
+          ) : (
+            <span className="text-faint">Nobody in particular — this one is the whole house.</span>
+          )}
+        </DetailRow>
+
+        {/* Events only, and only when they carry them. An imported entry has
+            neither column, so these two simply never render for one. */}
+        <DetailRow label="Where">{item.location || null}</DetailRow>
+        <DetailRow label="Notes">
+          {item.description ? (
+            <p className="whitespace-pre-wrap">{item.description}</p>
+          ) : null}
+        </DetailRow>
+
+        {item.readOnly ? (
+          <DetailRow label="Source">
+            <p className="text-muted">
+              Imported from a subscribed calendar, so it cannot be edited or deleted here
+              — the next sync would only bring it back. Remove the feed under{" "}
+              <span className="text-ink font-medium">Feeds</span> to take its events with it.
+            </p>
+          </DetailRow>
+        ) : null}
+      </div>
+
+      <div className="mt-5 flex justify-end gap-2">
+        <Button type="button" variant="ghost" onClick={onClose}>
+          Close
+        </Button>
+        {onDelete ? (
+          <Button
+            type="button"
+            variant="danger"
+            onClick={() => {
+              onDelete();
+              onClose();
+            }}
+          >
+            Delete
+          </Button>
+        ) : null}
+      </div>
+    </Modal>
+  );
+}
+
 /* ------------------------------------------------------------- Agenda row */
 
 const KIND_ICON = { event: "🎟️", entry: "•" } as const;
@@ -141,9 +294,11 @@ function rowGlyph(item: AgendaItem): { icon: string; label: string; hue: string 
 
 function AgendaRow({
   item,
+  onOpen,
   onDelete,
 }: {
   item: AgendaItem;
+  onOpen: () => void;
   onDelete: (() => void) | null;
 }) {
   const { byId } = useFamily();
@@ -152,7 +307,17 @@ function AgendaRow({
   const glyph = rowGlyph(item);
 
   return (
-    <li className="group hover:bg-sunk/50 flex items-start gap-3 rounded-xl px-2 py-3 transition-[background-color,transform] hover:translate-x-px">
+    <li className="group hover:bg-sunk/50 flex items-start rounded-xl transition-[background-color,transform] hover:translate-x-px">
+      {/* The row itself is the button. The delete control sits outside it —
+          nesting one button inside another is invalid, and on a phone there is
+          no hover to reveal it anyway, which is exactly why the sheet this
+          opens carries its own Delete. */}
+      <button
+        type="button"
+        onClick={onOpen}
+        className="flex min-w-0 flex-1 items-start gap-3 rounded-xl px-2 py-3 text-left"
+        aria-label={`${item.title} — see details`}
+      >
       {/* A colour bar reads faster than a dot at a glance across the kitchen. */}
       <span
         className="mt-0.5 w-1 shrink-0 self-stretch rounded-full"
@@ -192,18 +357,20 @@ function AgendaRow({
         </p>
       </div>
 
-      <span className="flex shrink-0 -space-x-1.5 pt-0.5">
-        {owners.slice(0, 3).map((o) => (
-          <span key={o.id} className="ring-surface rounded-full ring-2">
-            <Avatar member={o} size="sm" />
-          </span>
-        ))}
-      </span>
+        <span className="flex shrink-0 -space-x-1.5 pt-0.5">
+          {owners.slice(0, 3).map((o) => (
+            <span key={o.id} className="ring-surface rounded-full ring-2">
+              <Avatar member={o} size="sm" />
+            </span>
+          ))}
+        </span>
+      </button>
 
       {onDelete ? (
         <button
+          type="button"
           onClick={onDelete}
-          className="text-faint hover:bg-danger-soft hover:text-danger h-7 w-7 shrink-0 rounded-full opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100"
+          className="text-faint hover:bg-danger-soft hover:text-danger mt-3 mr-2 h-7 w-7 shrink-0 rounded-full opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100"
           aria-label={`Delete ${item.title}`}
         >
           ×
@@ -223,6 +390,8 @@ export function CalendarTab() {
   const [visibleDays, setVisibleDays] = useState(DAYS_PER_PAGE);
   const [open, setOpen] = useState(false);
   const [feedsOpen, setFeedsOpen] = useState(false);
+  /** The row whose details are on screen, or null. */
+  const [detail, setDetail] = useState<AgendaItem | null>(null);
   const [saving, setSaving] = useState(false);
 
   const { events, rsvps, error: eventsError } = useEvents();
@@ -233,6 +402,23 @@ export function CalendarTab() {
     deleteEntry,
     reload: reloadEntries,
   } = useCalendarEntries();
+
+  /**
+   * Whether a row can be removed from here, and how.
+   *
+   * Feed imports resync, so deleting one locally would only bring it back on
+   * the next run — the feed has to go instead. Events are posted rather than
+   * scheduled and are not this tab's to remove. Defined once because both the
+   * row's hover control and the detail sheet's Delete have to agree; two copies
+   * of this rule is how one of them ends up offering a delete that no-ops.
+   */
+  const deleteFor = useCallback(
+    (i: AgendaItem) =>
+      i.kind === "entry" && !i.readOnly
+        ? () => void deleteEntry(i.id.replace("entry:", ""))
+        : null,
+    [deleteEntry],
+  );
 
   // Subscribed iCal feeds refresh themselves in the background; entries reload
   // whenever a run brings something new in.
@@ -475,13 +661,8 @@ export function CalendarTab() {
                       <AgendaRow
                         key={i.id}
                         item={i}
-                        // Feed imports resync, so removing one here is
-                        // pointless; events are managed on their own tab.
-                        onDelete={
-                          i.kind === "entry" && !i.readOnly
-                            ? () => void deleteEntry(i.id.replace("entry:", ""))
-                            : null
-                        }
+                        onOpen={() => setDetail(i)}
+                        onDelete={deleteFor(i)}
                       />
                     ))}
                   </ul>
@@ -508,6 +689,12 @@ export function CalendarTab() {
           ) : null}
         </div>
       )}
+
+      <EventDetailSheet
+        item={detail}
+        onClose={() => setDetail(null)}
+        onDelete={detail ? deleteFor(detail) : null}
+      />
 
       <CalendarFeeds
         open={feedsOpen}
