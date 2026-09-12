@@ -12,7 +12,14 @@ import type { FamilyPhoto, PhotoWithUrl } from "@/lib/types";
  * a household that has been posting for a year should not pay for a year of
  * signed URLs to render six tiles.
  */
-const PAGE_SIZE = 24;
+/*
+ * The wall used to be a grid, where 24 thumbnails already overflowed a phone
+ * screen. It is a carousel now — it shows one at a time and rotates — so the
+ * cap is about how much history is worth holding in memory and re-signing every
+ * few hours, not about how much fits. 120 is roughly a year of occasional
+ * photos and still one modest query.
+ */
+const PAGE_SIZE = 120;
 
 /**
  * Signed URLs last 8 hours (see `SIGNED_URL_TTL`). The kitchen tablet is never
