@@ -415,6 +415,53 @@ select:focus-visible {
   transform: scale(1.04);
 }
 
+/* ------------------------------------------------------------ link cards */
+
+/*
+ * A shared link reads as a thing rather than a run of underlined text. The card
+ * is built from the URL alone — see LinkCard in ChatTab for why there is no
+ * fetched title or image — so it has to earn its place on shape, not content.
+ *
+ * Tinted from the bubble it sits in rather than given its own colour: inside
+ * someone else's bubble that is their member colour, and inside your own it is
+ * the ink bubble, where a light-on-dark treatment is the only readable one.
+ */
+.link-card {
+  /* A host like "blue-jays-game-center.kinglux99.chatgpt.site" is one unbroken
+     token inside a `truncate` span, which only shrinks when every flex ancestor
+     can. The bubble's own max-width already caps this; these are the belt to
+     that brace, so the card cannot become the thing that sets the bubble's
+     width. */
+  max-width: 100%;
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  background: color-mix(in srgb, var(--color-surface) 55%, transparent);
+  color: inherit;
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease;
+}
+
+.link-card:hover {
+  border-color: color-mix(in srgb, currentColor 34%, transparent);
+  background: color-mix(in srgb, var(--color-surface) 78%, transparent);
+}
+
+.link-card-glyph {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+/* Your own bubble is ink-filled, so a surface-tinted card disappears into it. */
+.link-card-mine {
+  border-color: color-mix(in srgb, var(--color-on-ink) 22%, transparent);
+  background: color-mix(in srgb, var(--color-on-ink) 12%, transparent);
+}
+
+.link-card-mine:hover {
+  border-color: color-mix(in srgb, var(--color-on-ink) 38%, transparent);
+  background: color-mix(in srgb, var(--color-on-ink) 20%, transparent);
+}
+
 /* ---------------------------------------------------------------- photos */
 
 /*

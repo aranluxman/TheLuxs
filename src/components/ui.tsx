@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { tint } from "@/lib/palette";
 import type { MemberWithPhoto } from "@/lib/types";
 
@@ -18,11 +18,28 @@ export function Avatar({
   member,
   size = "md",
   ring = false,
+  decorative = false,
 }: {
   member: Pick<MemberWithPhoto, "avatar_emoji" | "color" | "name" | "avatar_url"> | null;
   size?: keyof typeof AVATAR_SIZES;
   ring?: boolean;
+  /**
+   * Set when the person's name is already written next to the avatar.
+   *
+   * Without it the name is announced twice in a row — the avatar carries it as
+   * `alt`/`sr-only` so that a bare avatar is not anonymous, and the label beside
+   * it carries it again. Worse, the `alt` text is *visible* whenever the photo
+   * fails to load, so "Sukhi Luxman" sitting next to a broken avatar reads as
+   * "Sukhi LuxmanSukhi Luxman" on screen, not just to a screen reader.
+   */
+  decorative?: boolean;
 }) {
+  // A signed avatar URL expires after eight hours, and this app is left open on
+  // a kitchen tablet for days. When one lapses the browser would otherwise
+  // render the alt text inside the circle; falling back to the emoji keeps the
+  // row looking like a row.
+  const [broken, setBroken] = useState(false);
+
   if (!member) {
     return (
       <span
@@ -39,16 +56,21 @@ export function Avatar({
 
   // A real photo beats an emoji every time — that was the whole point of
   // adding them. The emoji stays as the fallback.
-  if (member.avatar_url) {
+  if (member.avatar_url && !broken) {
     return (
-      <span className={shell} style={{ boxShadow: shadow }} title={member.name}>
+      <span
+        className={shell}
+        style={{ boxShadow: shadow }}
+        title={decorative ? undefined : member.name}
+      >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={member.avatar_url}
-          alt={member.name}
+          alt={decorative ? "" : member.name}
           className="h-full w-full object-cover"
           loading="lazy"
           decoding="async"
+          onError={() => setBroken(true)}
         />
       </span>
     );
@@ -58,10 +80,10 @@ export function Avatar({
     <span
       className={shell}
       style={{ backgroundColor: tint(member.color, 0.16), boxShadow: shadow }}
-      title={member.name}
+      title={decorative ? undefined : member.name}
     >
       <span aria-hidden>{member.avatar_emoji}</span>
-      <span className="sr-only">{member.name}</span>
+      {decorative ? null : <span className="sr-only">{member.name}</span>}
     </span>
   );
 }

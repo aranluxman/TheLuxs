@@ -10,7 +10,7 @@
  * colour, PIN) stays in Postgres, where the rest of the household can see it.
  */
 
-export const START_TABS = ["calendar", "chores", "shopping", "chat"] as const;
+export const START_TABS = ["calendar", "todos", "chores", "shopping", "chat"] as const;
 export type StartTab = (typeof START_TABS)[number];
 
 export const WIDTHS = ["standard", "wide"] as const;
@@ -29,6 +29,7 @@ export const PREFS_STORAGE_KEY = "family-dashboard:prefs";
 
 export const START_TAB_LABELS: Record<StartTab, string> = {
   calendar: "Calendar",
+  todos: "To Do's",
   chores: "Chores",
   shopping: "Shopping",
   chat: "Chat",

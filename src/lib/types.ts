@@ -144,6 +144,28 @@ export interface ShoppingItem {
   completed_by: string | null;
 }
 
+/**
+ * One entry on the To Do's board.
+ *
+ * `assigned_to` null means the whole house, the same way `recipient_id` null
+ * means the group thread — the unassigned case is the common one, and a
+ * sentinel member row would make every read join against something fake.
+ *
+ * `due_on` is a plain `YYYY-MM-DD` day, not a timestamp: a task is due on a
+ * day, and storing an instant makes "is this overdue" a question about clocks
+ * instead of calendars.
+ */
+export interface Todo {
+  id: string;
+  title: string;
+  assigned_to: string | null;
+  due_on: string | null;
+  created_by: string | null;
+  created_at: string;
+  done_at: string | null;
+  done_by: string | null;
+}
+
 export interface Quote {
   id: string;
   quote_text: string;

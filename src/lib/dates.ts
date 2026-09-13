@@ -79,12 +79,24 @@ export function formatDayLabel(d: Date): string {
   return format(d, "EEEE, MMM d");
 }
 
-/** Chat separators: "Today", "Yesterday", then a real date. */
+/**
+ * Chat separators: "Today", "Yesterday", then a real date.
+ *
+ * Relative labels stop after two days on purpose. "3 days ago" needs arithmetic
+ * to place, where a weekday and a date can be read straight off — and this
+ * thread is never purged, so most of what a reader scrolls past is old.
+ *
+ * The year appears only when it is not the current one. A chat that keeps its
+ * whole history will eventually show two "Tuesday, September 8" separators a
+ * year apart, and there would be nothing on screen to tell them apart.
+ */
 export function formatChatDay(d: Date): string {
   const today = new Date();
   if (isSameDay(d, today)) return "Today";
   if (isSameDay(d, addDays(today, -1))) return "Yesterday";
-  return format(d, "EEEE, MMMM d");
+  return d.getFullYear() === today.getFullYear()
+    ? format(d, "EEEE, MMMM d")
+    : format(d, "EEEE, MMMM d, yyyy");
 }
 
 /** Value for a `datetime-local` input, in local time. */
