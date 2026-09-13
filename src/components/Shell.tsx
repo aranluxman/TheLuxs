@@ -1,12 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { usePrefs } from "@/hooks/usePrefs";
+import { useTabActivity, type ActivityTab } from "@/hooks/useTabActivity";
 import { WIDTH_CLASS } from "@/lib/prefs";
 import { useFamily } from "./FamilyProvider";
 import { CalendarTab } from "./CalendarTab";
 import { ChatTab } from "./ChatTab";
 import { ChoresTab } from "./ChoresTab";
+import { TodosTab } from "./TodosTab";
 import { ShoppingTab } from "./ShoppingTab";
 import { SettingsTab } from "./SettingsTab";
 import { ProfileSheet } from "./ProfileSheet";
@@ -19,6 +21,7 @@ import { Avatar } from "./ui";
 
 const TABS = [
   { id: "calendar", label: "Calendar", icon: "🗓️" },
+  { id: "todos", label: "To Do's", icon: "✅" },
   { id: "chores", label: "Chores", icon: "🧹" },
   { id: "shopping", label: "Shopping", icon: "🛒" },
   { id: "chat", label: "Chat", icon: "💬" },
@@ -26,6 +29,22 @@ const TABS = [
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
+
+/** Settings and Chat are excluded: neither has "new since you looked" activity. */
+const ACTIVITY_TABS = new Set<string>(["calendar", "todos", "chores", "shopping"]);
+
+function isActivityTab(id: TabId): id is ActivityTab {
+  return ACTIVITY_TABS.has(id);
+}
+
+/** "Something happened here since you last looked." */
+function NavDot() {
+  return (
+    <span className="bg-accent ring-canvas absolute -top-0.5 -right-1 h-2 w-2 rounded-full ring-2">
+      <span className="sr-only">New activity</span>
+    </span>
+  );
+}
 
 export function Shell() {
   const { currentMember, setCurrentMemberId } = useFamily();
@@ -40,6 +59,14 @@ export function Shell() {
   const [iconOpen, setIconOpen] = useState(false);
 
   const width = WIDTH_CLASS[prefs.width];
+
+  const { unseen, markSeen } = useTabActivity();
+
+  // Opening a tab is what marks it seen — including the one the app opens on,
+  // which is why this runs on mount as well as on every switch.
+  useEffect(() => {
+    if (isActivityTab(tab)) markSeen(tab);
+  }, [tab, markSeen]);
 
   return (
     <div className="flex min-h-full flex-1 flex-col">
@@ -85,11 +112,15 @@ export function Shell() {
                 key={t.id}
                 onClick={() => setTab(t.id)}
                 aria-current={tab === t.id ? "page" : undefined}
-                className={`inline-flex items-center rounded-xl px-3 py-2 text-sm font-semibold transition-[background-color,color,transform] ${
+                className={`relative inline-flex items-center rounded-xl px-3 py-2 text-sm font-semibold transition-[background-color,color,transform] ${
                   tab === t.id ? "bg-ink text-on-ink shadow-sm" : "text-muted hover:bg-sunk"
                 }`}
               >
                 {t.label}
+                {/* Only on a tab you are not already looking at — the one on
+                    screen is seen by definition, and a dot there would blink on
+                    and off as rows arrive under you. */}
+                {tab !== t.id && isActivityTab(t.id) && unseen[t.id] ? <NavDot /> : null}
               </button>
             ))}
           </nav>
@@ -127,6 +158,7 @@ export function Shell() {
 
       <main className={`dashboard-main mx-auto w-full ${width} flex-1 px-4 pt-5 pb-24 lg:pb-8`}>
         {tab === "calendar" ? <CalendarTab /> : null}
+        {tab === "todos" ? <TodosTab /> : null}
         {tab === "chores" ? <ChoresTab /> : null}
         {tab === "shopping" ? <ShoppingTab /> : null}
         {tab === "chat" ? <ChatTab /> : null}
@@ -134,7 +166,7 @@ export function Shell() {
       </main>
 
       <nav
-        className="mobile-nav glass-panel border-line fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden"
+        className="mobile-nav glass-panel border-line fixed inset-x-0 bottom-0 z-30 grid grid-cols-6 border-t pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden"
         aria-label="Sections"
       >
         {TABS.map((t) => (
@@ -147,8 +179,9 @@ export function Shell() {
             }`}
           >
             {tab === t.id ? <span className="bg-accent absolute top-0 h-0.5 w-10 rounded-full" aria-hidden /> : null}
-            <span className="text-lg" aria-hidden>
+            <span className="relative text-lg" aria-hidden>
               {t.icon}
+              {tab !== t.id && isActivityTab(t.id) && unseen[t.id] ? <NavDot /> : null}
             </span>
             {t.label}
           </button>

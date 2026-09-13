@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useMessages, type OutgoingAttachment } from "@/hooks/useMessages";
 import { useReactions } from "@/hooks/useReactions";
+import { createTodo } from "@/hooks/useTodos";
 import { useVoiceRecorder } from "@/hooks/useVoiceRecorder";
 import { formatChatDay, formatTime, parseISO } from "@/lib/dates";
 import { tint } from "@/lib/palette";
@@ -219,10 +220,15 @@ function ReactionPicker({
   summaries,
   onPick,
   onDelete,
+  onMakeTodo,
+  todoState,
 }: {
   summaries: ReactionSummary[];
   onPick: (emoji: ReactionEmoji) => void;
   onDelete: (() => void) | null;
+  /** Null when there is nothing to turn into a task — an image with no words. */
+  onMakeTodo: (() => void) | null;
+  todoState: "idle" | "saving" | "done";
 }) {
   const mineFor = (emoji: ReactionEmoji) => summaries.some((s) => s.emoji === emoji && s.mine);
 
@@ -241,6 +247,22 @@ function ReactionPicker({
           <span aria-hidden>{emoji}</span>
         </button>
       ))}
+      {onMakeTodo ? (
+        <>
+          <span className="bg-line mx-0.5 h-5 w-px" aria-hidden />
+          <button
+            onClick={onMakeTodo}
+            disabled={todoState !== "idle"}
+            aria-label="Make this message a task"
+            title={todoState === "done" ? "Added to To Do's" : "Make this a task"}
+            className={`grid h-8 w-8 place-items-center rounded-full text-sm transition-colors ${
+              todoState === "done" ? "text-accent" : "text-faint hover:bg-sunk hover:text-ink"
+            }`}
+          >
+            <span aria-hidden>{todoState === "done" ? "✅" : todoState === "saving" ? "…" : "＋"}</span>
+          </button>
+        </>
+      ) : null}
       {onDelete ? (
         <>
           <span className="bg-line mx-0.5 h-5 w-px" aria-hidden />
@@ -255,6 +277,95 @@ function ReactionPicker({
       ) : null}
     </div>
   );
+}
+
+/* ------------------------------------------------------------------ links */
+
+/** Matches bare http(s) URLs. Trailing punctuation is trimmed below. */
+const URL_RE = /https?:\/\/[^\s<>"]+/gi;
+
+/** Sentence punctuation that ends up glued to a pasted link. */
+function trimTrailing(url: string): string {
+  return url.replace(/[.,;:!?)\]}'"]+$/, "");
+}
+
+function firstLink(text: string): string | null {
+  const match = text.match(URL_RE);
+  return match ? trimTrailing(match[0]) : null;
+}
+
+/**
+ * A shared link, as a card rather than a blue run of text.
+ *
+ * Deliberately built only from the URL itself — host, then path. A real preview
+ * means fetching the page's title and image, and this app is a static export
+ * with no server to do that: the browser would have to fetch the target
+ * directly, which CORS forbids for most sites and which would leak every link
+ * the family shares to that site as a request from their home address. A card
+ * that shows what is actually knowable is better than one that invents it.
+ */
+function LinkCard({ url, mine }: { url: string; mine: boolean }) {
+  let host: string;
+  let path: string;
+  try {
+    const parsed = new URL(url);
+    host = parsed.host.replace(/^www\./, "");
+    path = parsed.pathname === "/" ? "" : decodeURIComponent(parsed.pathname);
+  } catch {
+    // Not parseable, so it is not really a link — let the text render as text.
+    return null;
+  }
+
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noreferrer noopener"
+      className={`link-card mt-1 flex items-center gap-2.5 rounded-xl px-3 py-2 no-underline ${
+        mine ? "link-card-mine" : ""
+      }`}
+    >
+      <span className="link-card-glyph grid h-8 w-8 shrink-0 place-items-center rounded-lg text-sm" aria-hidden>
+        🔗
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-xs font-semibold">{host}</span>
+        {path ? <span className="block truncate text-[11px] opacity-70">{path}</span> : null}
+      </span>
+      <span className="shrink-0 text-xs opacity-60" aria-hidden>
+        ↗
+      </span>
+    </a>
+  );
+}
+
+/** Message text with any URLs turned into real links. */
+function MessageText({ text }: { text: string }) {
+  const parts: React.ReactNode[] = [];
+  let last = 0;
+
+  for (const match of text.matchAll(URL_RE)) {
+    const raw = match[0];
+    const url = trimTrailing(raw);
+    const start = match.index ?? 0;
+    if (start > last) parts.push(text.slice(last, start));
+    parts.push(
+      <a
+        key={`${start}-${url}`}
+        href={url}
+        target="_blank"
+        rel="noreferrer noopener"
+        className="underline underline-offset-2"
+      >
+        {url}
+      </a>,
+    );
+    // Anything trimmed off the end is punctuation and belongs to the sentence.
+    last = start + url.length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+
+  return <p>{parts}</p>;
 }
 
 /* ---------------------------------------------------------- Conversations */
@@ -383,6 +494,8 @@ export function ChatTab() {
   /** Message queued for deletion, held until the prompt is answered. */
   const [pendingDelete, setPendingDelete] = useState<Message | null>(null);
   const [deleting, setDeleting] = useState(false);
+  /** message id → how its "make this a task" button is doing. */
+  const [todoStates, setTodoStates] = useState<Record<string, "saving" | "done">>({});
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -518,6 +631,40 @@ export function ChatTab() {
     setActiveId(null);
   }
 
+  // Annotated rather than inferred: `Record<string, T>` indexing is typed as T
+  // here, so without this the `?? "idle"` reads as unreachable and every
+  // comparison against "idle" is rejected.
+  const todoStateFor = (id: string): "idle" | "saving" | "done" =>
+    todoStates[id] ?? "idle";
+
+  /**
+   * Turn a message into a task, unassigned and undated.
+   *
+   * Deliberately one tap with no dialog: the point is to capture "we need to
+   * book the dentist" before it scrolls away, and a form asking who and when
+   * would make it slower than retyping it on the To Do's tab. It lands on the
+   * board where it can be assigned and dated properly.
+   */
+  async function makeTodo(message: Message) {
+    const text = message.message_text.trim();
+    if (!text || todoStateFor(message.id) !== "idle") return;
+
+    setTodoStates((prev) => ({ ...prev, [message.id]: "saving" }));
+    const result = await createTodo(text, null, null, currentMember?.id ?? null);
+
+    if (!result.ok) {
+      setUploadError(result.error);
+      setTodoStates((prev) => {
+        const next = { ...prev };
+        delete next[message.id];
+        return next;
+      });
+      return;
+    }
+    setTodoStates((prev) => ({ ...prev, [message.id]: "done" }));
+    setActiveId(null);
+  }
+
   function toggleReaction(messageId: string, emoji: ReactionEmoji) {
     if (!currentMember) return;
     void reactions.toggle(messageId, currentMember.id, emoji);
@@ -624,11 +771,10 @@ export function ChatTab() {
                       r.mine ? "justify-end" : "justify-start"
                     } ${r.endsGroup ? "mb-3" : "mb-1"}`}
                   >
-                    {!r.mine ? (
-                      <span className={r.endsGroup ? "" : "invisible"}>
-                        <Avatar member={sender} size="sm" />
-                      </span>
-                    ) : null}
+                    {/* A spacer, not an avatar. The avatar moved up beside the
+                        sender's name where it is easier to scan; this only
+                        keeps every bubble in a group on the same left edge. */}
+                    {!r.mine ? <span className="w-7 shrink-0" aria-hidden /> : null}
 
                     <div
                       className={`flex min-w-0 max-w-[78%] flex-col ${
@@ -636,11 +782,20 @@ export function ChatTab() {
                       }`}
                     >
                       {!r.mine && r.startsGroup ? (
-                        <span
-                          className="mb-1 ml-1.5 text-[11px] font-semibold tracking-wide"
-                          style={{ color }}
-                        >
-                          {sender?.name ?? "Unknown"}
+                        <span className="mb-1 -ml-8 flex items-center gap-1.5">
+                          {/* `decorative` is load-bearing: Avatar otherwise
+                              carries the name as alt/sr-only, which the label
+                              beside it then repeats — announced twice by a
+                              screen reader, and rendered twice on screen the
+                              moment a signed avatar URL lapses and the browser
+                              falls back to the alt text. */}
+                          <Avatar member={sender} size="sm" decorative />
+                          <span
+                            className="text-[11px] font-semibold tracking-wide"
+                            style={{ color }}
+                          >
+                            {sender?.name ?? "Unknown"}
+                          </span>
                         </span>
                       ) : null}
 
@@ -690,7 +845,15 @@ export function ChatTab() {
                               }
                               mine={r.mine}
                             />
-                            {r.message.message_text ? <p>{r.message.message_text}</p> : null}
+                            {r.message.message_text ? (
+                              <>
+                                <MessageText text={r.message.message_text} />
+                                {(() => {
+                                  const url = firstLink(r.message.message_text);
+                                  return url ? <LinkCard url={url} mine={r.mine} /> : null;
+                                })()}
+                              </>
+                            ) : null}
                           </div>
 
                           {isActive ? (
@@ -703,6 +866,12 @@ export function ChatTab() {
                                 onDelete={
                                   canDelete ? () => setPendingDelete(r.message) : null
                                 }
+                                onMakeTodo={
+                                  r.message.message_text.trim()
+                                    ? () => void makeTodo(r.message)
+                                    : null
+                                }
+                                todoState={todoStateFor(r.message.id)}
                               />
                             </div>
                           ) : null}
