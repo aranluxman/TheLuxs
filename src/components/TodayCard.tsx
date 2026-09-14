@@ -1,6 +1,7 @@
 "use client";
 
 import { useDailyExtras } from "@/hooks/useDailyExtras";
+import { usePrefs } from "@/hooks/usePrefs";
 import { format } from "@/lib/dates";
 import { Card } from "./ui";
 
@@ -14,7 +15,8 @@ import { Card } from "./ui";
  * people's notes to remove a panel is not a trade this change gets to make.
  */
 export function TodayCard() {
-  const { quoteOfTheDay } = useDailyExtras();
+  const { prefs } = usePrefs();
+  const { quoteOfTheDay } = useDailyExtras(prefs.showQuote);
 
   return (
     <Card className="today-card">
@@ -29,7 +31,7 @@ export function TodayCard() {
           Your family at a glance
         </span>
       </div>
-      {quoteOfTheDay ? (
+      {prefs.showQuote && quoteOfTheDay ? (
         <div className="border-line relative z-[1] border-t px-5 py-4 pb-5 sm:px-6">
           <p className="text-ink text-[15px] leading-relaxed font-medium text-balance">
             &ldquo;{quoteOfTheDay.quote_text}&rdquo;

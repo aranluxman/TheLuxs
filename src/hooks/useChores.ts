@@ -1,7 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CHORES, cadenceMeta, type ChoreDefinition } from "@/lib/chores";
+import {
+  CHORES,
+  cadenceMeta,
+  chorePoints,
+  type ChoreDefinition,
+} from "@/lib/chores";
 import { todayKey, weekDayKeys, weekKey } from "@/lib/dates";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
 import type { ChoreTick } from "@/lib/types";
@@ -43,7 +48,12 @@ export function periodKeyFor(chore: ChoreDefinition, period: Period): string {
  * is the point of the feature and a daily chore's ticks are filed one per day
  * — Monday's sweep and Friday's sweep are different rows. Eight period keys
  * (seven days plus the week) cover every point available, and that is still a
- * tiny query: the ceiling is one row per chore per day.
+ * tiny query: the ceiling is a row per chore per person per day.
+ *
+ * Since migration 0016 a chore can carry several sign-ups in one period —
+ * the dishes get washed three times a day and rarely by the same person — so
+ * everything here works in terms of *a list* of ticks per chore rather than
+ * the single tick the first version assumed.
  */
 export function useChores(ready = true) {
   const [ticks, setTicks] = useState<ChoreTick[]>([]);
@@ -109,9 +119,7 @@ export function useChores(ready = true) {
       // rollover reached another phone first — is not ours to render.
       if (!inWindow.has(row.period_key)) return;
       setTicks((prev) => {
-        const i = prev.findIndex(
-          (t) => t.chore_key === row.chore_key && t.period_key === row.period_key,
-        );
+        const i = prev.findIndex((t) => t.id === row.id);
         if (i === -1) return [...prev, row];
         const next = [...prev];
         next[i] = row;
@@ -129,9 +137,8 @@ export function useChores(ready = true) {
       .on(
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "family_chore_ticks" },
-        // A chore changing hands. Migration 0010 allows exactly this update,
-        // and it moves a point from one person to another — so the leaderboard
-        // has to see it, not just the card.
+        // A single-owner chore changing hands. It moves points from one person
+        // to another, so the leaderboard has to see it, not just the card.
         (payload) => upsertLocal(payload.new as ChoreTick),
       )
       .on(
@@ -140,12 +147,8 @@ export function useChores(ready = true) {
         (payload) => {
           // Needs FULL replica identity, which migration 0008 sets.
           const row = payload.old as Partial<ChoreTick>;
-          if (!row.chore_key || !row.period_key) return;
-          setTicks((prev) =>
-            prev.filter(
-              (t) => !(t.chore_key === row.chore_key && t.period_key === row.period_key),
-            ),
-          );
+          if (!row.id) return;
+          setTicks((prev) => prev.filter((t) => t.id !== row.id));
         },
       )
       .subscribe();
@@ -155,96 +158,140 @@ export function useChores(ready = true) {
     };
   }, [ready, windowId]);
 
-  /** The tick on a chore's *current* period, or null if nobody has done it. */
-  const tickFor = useCallback(
-    (chore: ChoreDefinition): ChoreTick | null => {
+  /** Everyone signed up for a chore in its *current* period, oldest first. */
+  const ticksFor = useCallback(
+    (chore: ChoreDefinition): ChoreTick[] => {
       const key = periodKeyFor(chore, period);
-      return ticks.find((t) => t.chore_key === chore.key && t.period_key === key) ?? null;
+      return ticks
+        .filter((t) => t.chore_key === chore.key && t.period_key === key)
+        .sort((a, b) => a.done_at.localeCompare(b.done_at));
     },
     [ticks, period],
   );
 
   /**
-   * Record who did a chore, or clear it with `null`.
+   * Sign a person up for a chore, or take their name off it.
    *
-   * Written optimistically because the whole interaction is one tap in
-   * passing, and a round trip's worth of lag makes the card feel broken.
+   * Three shapes, all of them one statement:
    *
-   * Claiming and re-attributing are the same statement — an upsert on the
-   * primary key. That matters for the second case: as a delete plus an insert,
-   * a correction that fails halfway loses the tick entirely and takes a point
-   * off somebody who earned it, whereas `on conflict do update` cannot
-   * half-happen.
+   *   already signed up      delete their row — tapping your own face undoes it
+   *   multi-signup chore     insert another row; everyone who helped scores
+   *   single-owner chore     hand it over: update `done_by` on the row that is
+   *                          already there, rather than delete-then-insert. A
+   *                          two-statement swap that fails halfway loses the
+   *                          tick and takes points off somebody who earned them.
+   *
+   * Written optimistically, because the whole interaction is one tap in
+   * passing and a round trip's worth of lag makes the card feel broken. The id
+   * of an optimistic row is a placeholder until the insert comes back with the
+   * real one; the reconcile below swaps it, and Realtime's echo is matched on
+   * id so it cannot double up.
    */
-  const setDoneBy = useCallback(
-    async (chore: ChoreDefinition, memberId: string | null) => {
+  const toggleMember = useCallback(
+    async (chore: ChoreDefinition, memberId: string) => {
       const periodKey = periodKeyFor(chore, period);
-      const matches = (t: ChoreTick) =>
+      const inPeriod = (t: ChoreTick) =>
         t.chore_key === chore.key && t.period_key === periodKey;
-      const previous = ticks.find(matches) ?? null;
 
-      if (memberId === null) {
-        setTicks((prev) => prev.filter((t) => !matches(t)));
+      const current = ticks.filter(inPeriod);
+      const mine = current.find((t) => t.done_by === memberId) ?? null;
 
+      /* ------------------------------------------------ taking a name off */
+      if (mine) {
+        setTicks((prev) => prev.filter((t) => t.id !== mine.id));
         const { error: err } = await getSupabase()
           .from("family_chore_ticks")
           .delete()
-          .eq("chore_key", chore.key)
-          .eq("period_key", periodKey);
-
+          .eq("id", mine.id);
         if (err) {
-          if (previous) setTicks((prev) => (prev.some(matches) ? prev : [...prev, previous]));
+          setTicks((prev) => (prev.some((t) => t.id === mine.id) ? prev : [...prev, mine]));
           setError(err.message);
         }
         return;
       }
 
+      /* ------------------------------------- handing over a one-owner chore */
+      const holder = chore.multi ? null : (current[0] ?? null);
+      if (holder) {
+        const doneAt = new Date().toISOString();
+        setTicks((prev) =>
+          prev.map((t) =>
+            t.id === holder.id ? { ...t, done_by: memberId, done_at: doneAt } : t,
+          ),
+        );
+        const { data, error: err } = await getSupabase()
+          .from("family_chore_ticks")
+          .update({ done_by: memberId, done_at: doneAt })
+          .eq("id", holder.id)
+          .select()
+          .maybeSingle();
+
+        if (err || !data) {
+          setTicks((prev) => prev.map((t) => (t.id === holder.id ? holder : t)));
+          setError(err?.message ?? "That did not save.");
+          return;
+        }
+        setTicks((prev) => prev.map((t) => (t.id === holder.id ? (data as ChoreTick) : t)));
+        return;
+      }
+
+      /* --------------------------------------------------- a fresh sign-up */
+      const pending = `pending:${chore.key}:${periodKey}:${memberId}`;
       const optimistic: ChoreTick = {
+        id: pending,
         chore_key: chore.key,
         period_key: periodKey,
         done_by: memberId,
         done_at: new Date().toISOString(),
+        points: chorePoints(chore),
       };
-      setTicks((prev) =>
-        prev.some(matches) ? prev.map((t) => (matches(t) ? optimistic : t)) : [...prev, optimistic],
-      );
+      setTicks((prev) => [...prev, optimistic]);
 
       const { data, error: err } = await getSupabase()
         .from("family_chore_ticks")
-        .upsert(
-          { chore_key: chore.key, period_key: periodKey, done_by: memberId, done_at: optimistic.done_at },
-          { onConflict: "chore_key,period_key" },
-        )
+        .insert({
+          chore_key: chore.key,
+          period_key: periodKey,
+          done_by: memberId,
+          done_at: optimistic.done_at,
+          points: optimistic.points,
+        })
         .select()
         .single();
 
-      if (err) {
-        setTicks((prev) => {
-          const without = prev.filter((t) => !matches(t));
-          return previous ? [...without, previous] : without;
-        });
-        setError(err.message);
+      if (err || !data) {
+        setTicks((prev) => prev.filter((t) => t.id !== pending));
+        setError(err?.message ?? "That did not save.");
         return;
       }
-      setTicks((prev) => prev.map((t) => (matches(t) ? (data as ChoreTick) : t)));
+      const saved = data as ChoreTick;
+      setTicks((prev) => {
+        // Realtime may have delivered the real row already, in which case the
+        // placeholder is simply dropped rather than replaced.
+        const withoutPending = prev.filter((t) => t.id !== pending);
+        return withoutPending.some((t) => t.id === saved.id)
+          ? withoutPending
+          : [...withoutPending, saved];
+      });
     },
     [ticks, period],
   );
 
   /**
-   * Points per member for this week — one per chore finished, whichever day it
-   * was and whichever chore it was. Ticks whose owner has since been removed
-   * from the family carry a null `done_by` and score for nobody.
+   * Points per member for this week, weighted: a tick is worth whatever was
+   * stamped on it, so mopping counts double and a re-worded roster never
+   * re-scores the past. Ticks whose owner has since left the family carry a
+   * null `done_by` and score for nobody.
    */
   const scores = useMemo(() => {
     const out: Record<string, number> = {};
     for (const t of ticks) {
-      if (t.done_by) out[t.done_by] = (out[t.done_by] ?? 0) + 1;
+      if (t.done_by) out[t.done_by] = (out[t.done_by] ?? 0) + (t.points ?? 1);
     }
     return out;
   }, [ticks]);
 
-  /** How much of what is on screen right now is closed out. */
+  /** How much of what is on screen right now has at least one name on it. */
   const progress = useMemo(() => {
     const done = CHORES.filter((c) => {
       const key = periodKeyFor(c, period);
@@ -253,5 +300,5 @@ export function useChores(ready = true) {
     return { done, total: CHORES.length };
   }, [ticks, period]);
 
-  return { ticks, tickFor, setDoneBy, scores, progress, period, loading, error, reload: load };
+  return { ticks, ticksFor, toggleMember, scores, progress, period, loading, error, reload: load };
 }

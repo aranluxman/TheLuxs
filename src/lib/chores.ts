@@ -31,6 +31,31 @@ export interface ChoreDefinition {
   detail: string;
   icon: string;
   cadence: ChoreCadence;
+  /**
+   * What finishing it is worth. Mopping the floors is not wiping the table,
+   * and a board where every job scores the same quietly rewards whoever gets
+   * to the quick ones first.
+   *
+   * Defaults to 1 via `chorePoints`, so a chore that says nothing is worth a
+   * point. Changing a number here only affects future ticks: the value is
+   * stamped on the row when the chore is done (migration 0016), so last
+   * month's history is not re-scored.
+   */
+  points?: number;
+  /**
+   * Whether several people can sign up for the same chore in the same period.
+   *
+   * The dishes get washed after breakfast, after lunch and after dinner, and
+   * rarely by the same person. For those, every name that taps gets its own
+   * tick and its own points. For everything else the chore has one owner and
+   * tapping a second face hands it over.
+   */
+  multi?: boolean;
+}
+
+/** What a chore is worth. Unstated means one point. */
+export function chorePoints(chore: ChoreDefinition): number {
+  return chore.points ?? 1;
 }
 
 export interface CadenceMeta {
@@ -72,6 +97,7 @@ export const CHORES: readonly ChoreDefinition[] = [
     detail: "Kitchen, hallway and the dining area.",
     icon: "🧹",
     cadence: "daily",
+    multi: true,
   },
   {
     key: "wiping_table",
@@ -79,6 +105,15 @@ export const CHORES: readonly ChoreDefinition[] = [
     detail: "After dinner — table and the counters.",
     icon: "🧽",
     cadence: "daily",
+    multi: true,
+  },
+  {
+    key: "loading_dishwasher",
+    title: "Loading the dishwasher",
+    detail: "Clear the sink into it and set it running.",
+    icon: "🧴",
+    cadence: "daily",
+    multi: true,
   },
   {
     key: "unloading_dishwasher",
@@ -93,6 +128,7 @@ export const CHORES: readonly ChoreDefinition[] = [
     detail: "Anything that does not go in the dishwasher.",
     icon: "🫧",
     cadence: "daily",
+    multi: true,
   },
   {
     key: "mopping",
@@ -100,6 +136,7 @@ export const CHORES: readonly ChoreDefinition[] = [
     detail: "Kitchen and the hard floors downstairs.",
     icon: "🪣",
     cadence: "weekend",
+    points: 2,
   },
   {
     key: "vacuuming",
@@ -107,6 +144,7 @@ export const CHORES: readonly ChoreDefinition[] = [
     detail: "Living room, stairs and the bedrooms.",
     icon: "🌀",
     cadence: "weekend",
+    points: 2,
   },
   {
     key: "washrooms",
@@ -114,6 +152,7 @@ export const CHORES: readonly ChoreDefinition[] = [
     detail: "Both bathrooms — sinks, mirrors, toilets, tub.",
     icon: "🚿",
     cadence: "weekend",
+    points: 2,
   },
 ];
 
@@ -129,6 +168,8 @@ export function cadenceMeta(id: ChoreCadence): CadenceMeta {
  * leaderboard so a score has something to be a fraction of.
  */
 export const POINTS_AVAILABLE_PER_WEEK = CHORES.reduce(
-  (total, chore) => total + (cadenceMeta(chore.cadence).period === "day" ? 7 : 1),
+  (total, chore) =>
+    total +
+    chorePoints(chore) * (cadenceMeta(chore.cadence).period === "day" ? 7 : 1),
   0,
 );

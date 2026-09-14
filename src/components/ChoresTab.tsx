@@ -1,19 +1,32 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useChores } from "@/hooks/useChores";
+import {
+  HISTORY_RANGES,
+  useChoreHistory,
+  type HistoryRangeId,
+} from "@/hooks/useChoreHistory";
 import {
   CADENCES,
   CHORES,
   POINTS_AVAILABLE_PER_WEEK,
   cadenceMeta,
+  chorePoints,
   type ChoreDefinition,
 } from "@/lib/chores";
-import { addDays, format, formatTime, parseISO, startOfWeekMon } from "@/lib/dates";
+import {
+  addDays,
+  format,
+  formatDayLabel,
+  formatTime,
+  parseISO,
+  startOfWeekMon,
+} from "@/lib/dates";
 import { tint } from "@/lib/palette";
 import type { ChoreTick, MemberWithPhoto } from "@/lib/types";
 import { useFamily } from "./FamilyProvider";
-import { Avatar, Card, ErrorNote } from "./ui";
+import { Avatar, Button, Card, EmptyState, ErrorNote } from "./ui";
 
 /**
  * The chore board.
@@ -135,14 +148,14 @@ function Leaderboard({ scores }: { scores: Record<string, number> }) {
         ) : leaders.length === 1 ? (
           <>
             <strong className="text-ink font-semibold">{leaders[0].member.name}</strong> has
-            done the most chores this week.
+            the most points this week.
           </>
         ) : (
           <>
             <strong className="text-ink font-semibold">
               {leaders.map((l) => l.member.name).join(" and ")}
             </strong>{" "}
-            are tied for the most chores this week.
+            are tied for the most points this week.
           </>
         )}
       </p>
@@ -154,24 +167,29 @@ function Leaderboard({ scores }: { scores: Record<string, number> }) {
 
 function ChoreCard({
   chore,
-  tick,
-  onSetDoneBy,
+  ticks,
+  onToggleMember,
 }: {
   chore: ChoreDefinition;
-  tick: ChoreTick | null;
-  onSetDoneBy: (memberId: string | null) => void;
+  ticks: ChoreTick[];
+  onToggleMember: (memberId: string) => void;
 }) {
   const { members, byId } = useFamily();
 
-  const done = tick !== null;
+  const done = ticks.length > 0;
   const meta = cadenceMeta(chore.cadence);
-  const doneBy = tick?.done_by ? byId[tick.done_by] : null;
+  const points = chorePoints(chore);
+  const signedUp = new Set(ticks.map((t) => t.done_by).filter(Boolean) as string[]);
 
   return (
     <Card
       className="chore-card tile-lift flex flex-col gap-3 p-4"
       data-done={done}
-      style={doneBy ? ({ "--chore-hue": doneBy.color } as React.CSSProperties) : undefined}
+      style={
+        ticks[0]?.done_by && byId[ticks[0].done_by]
+          ? ({ "--chore-hue": byId[ticks[0].done_by].color } as React.CSSProperties)
+          : undefined
+      }
     >
       <div className="flex items-start gap-3">
         <span
@@ -186,28 +204,47 @@ function ChoreCard({
             <h4 className="min-w-0 flex-1 text-[15px] leading-snug font-semibold">
               {chore.title}
             </h4>
-            <span className="bg-accent-soft text-accent shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold tracking-[0.08em] uppercase">
-              {meta.badge}
+            <span className="flex shrink-0 flex-col items-end gap-1">
+              <span className="bg-accent-soft text-accent rounded-full px-2 py-0.5 text-[10px] font-bold tracking-[0.08em] uppercase">
+                {meta.badge}
+              </span>
+              {/* Worth saying on the card rather than only in the rules: the
+                  whole reason to mop instead of wiping the table is that it
+                  pays double, and a scoreboard that hides its own odds is not
+                  a scoreboard. */}
+              <span className="border-line text-muted rounded-full border px-2 py-0.5 text-[10px] font-bold tabular-nums">
+                {points} {points === 1 ? "pt" : "pts"}
+              </span>
             </span>
           </div>
           <p className="text-muted mt-0.5 text-xs">{chore.detail}</p>
+          {chore.multi ? (
+            <p className="text-faint mt-1 text-[11px]">
+              Done more than once a day — everyone who helps takes the points.
+            </p>
+          ) : null}
         </div>
       </div>
 
       {/* Everyone's face on every card. Tapping one is the whole interaction:
-          it claims the chore, or hands it to whoever actually did it if the
-          first tap was wrong. */}
+          it signs you up, or — on a one-owner chore — hands it to whoever
+          actually did it if the first tap was wrong. Tapping your own face
+          again takes your name back off. */}
       <div className="mt-auto">
         <p className="text-faint mb-2 text-[11px] font-semibold">
-          {done ? "Point goes to" : "Who did it?"}
+          {done
+            ? chore.multi
+              ? `Points to ${signedUp.size} ${signedUp.size === 1 ? "person" : "people"}`
+              : "Point goes to"
+            : "Who did it?"}
         </p>
         <div className="flex flex-wrap gap-1.5">
           {members.map((m) => {
-            const mine = tick?.done_by === m.id;
+            const mine = signedUp.has(m.id);
             return (
               <button
                 key={m.id}
-                onClick={() => onSetDoneBy(mine ? null : m.id)}
+                onClick={() => onToggleMember(m.id)}
                 aria-pressed={mine}
                 title={
                   mine
@@ -217,7 +254,7 @@ function ChoreCard({
                 aria-label={
                   mine
                     ? `${m.name} did ${chore.title}. Tap again to undo.`
-                    : `Give the point for ${chore.title} to ${m.name}`
+                    : `Give the points for ${chore.title} to ${m.name}`
                 }
                 className={`inline-flex min-h-9 items-center gap-1.5 rounded-full border py-1 pr-2.5 pl-1 text-xs font-semibold transition-colors ${
                   mine ? "text-ink" : "border-line text-muted hover:bg-sunk"
@@ -237,21 +274,199 @@ function ChoreCard({
       </div>
 
       {done ? (
-        <p className="text-success border-success/30 flex items-center gap-1.5 border-t pt-2.5 text-xs font-medium">
-          <span aria-hidden>✓</span>
-          {doneBy ? `${doneBy.name} · ` : ""}
-          {tick ? formatTime(parseISO(tick.done_at)) : ""}
-          <span className="text-faint ml-auto font-normal">+1 point</span>
-        </p>
+        <div className="border-success/30 space-y-1 border-t pt-2.5">
+          {ticks.map((t) => {
+            const who = t.done_by ? byId[t.done_by] : null;
+            return (
+              <p
+                key={t.id}
+                className="text-success flex items-center gap-1.5 text-xs font-medium"
+              >
+                <span aria-hidden>✓</span>
+                {who ? `${who.name} · ` : ""}
+                {formatTime(parseISO(t.done_at))}
+                <span className="text-faint ml-auto font-normal">
+                  +{t.points ?? 1} {(t.points ?? 1) === 1 ? "point" : "points"}
+                </span>
+              </p>
+            );
+          })}
+        </div>
       ) : null}
     </Card>
+  );
+}
+
+/* ----------------------------------------------------------------- history */
+
+/**
+ * Everything the house has ticked off, and who has done the most of it.
+ *
+ * Collapsed behind a button rather than open by default: the board is what you
+ * come here for, and the history is what you come here for once a month when
+ * somebody claims they always do the dishes.
+ */
+function History() {
+  const { byId, members } = useFamily();
+  const [open, setOpen] = useState(false);
+  const [range, setRange] = useState<HistoryRangeId>("30d");
+  const { entries, totals, loading, error } = useChoreHistory(range, open);
+
+  const topChores = totals[0]?.chores ?? 0;
+
+  return (
+    <section>
+      <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <h3 className="text-muted text-[11px] font-bold tracking-[0.12em] uppercase">
+            History
+          </h3>
+          <p className="text-faint mt-0.5 text-xs">
+            Everything that has been ticked off, and who has done the most.
+          </p>
+        </div>
+        <Button variant="ghost" onClick={() => setOpen((v) => !v)}>
+          {open ? "Hide" : "Show history"}
+        </Button>
+      </div>
+
+      {open ? (
+        <div className="space-y-3">
+          <ErrorNote message={error} />
+
+          <div className="bg-sunk inline-flex rounded-xl p-1 shadow-inner" role="group" aria-label="How far back">
+            {HISTORY_RANGES.map((r) => (
+              <button
+                key={r.id}
+                onClick={() => setRange(r.id)}
+                aria-pressed={range === r.id}
+                className={`rounded-lg px-2.5 py-1.5 text-xs font-medium whitespace-nowrap transition-colors ${
+                  range === r.id ? "bg-surface text-ink shadow-sm" : "text-muted"
+                }`}
+              >
+                {r.label}
+              </button>
+            ))}
+          </div>
+
+          {loading ? (
+            <div className="space-y-2" role="status" aria-label="Loading the history">
+              <span className="skeleton block h-32 rounded-xl" />
+              <span className="skeleton block h-40 rounded-xl" />
+            </div>
+          ) : entries.length === 0 ? (
+            <Card>
+              <EmptyState
+                icon="📜"
+                title="Nothing in the history yet"
+                hint="Tick a chore off and it lands here for good."
+              />
+            </Card>
+          ) : (
+            <>
+              <Card className="overflow-hidden">
+                <p className="border-line text-muted border-b px-4 py-2.5 text-xs font-semibold">
+                  Who did the most
+                </p>
+                <ol className="divide-line divide-y">
+                  {totals.map((row, i) => {
+                    const member = byId[row.memberId];
+                    if (!member) return null;
+                    return (
+                      <li key={row.memberId} className="flex items-center gap-3 px-4 py-2.5">
+                        <span
+                          className={`w-5 shrink-0 text-center text-xs font-bold tabular-nums ${
+                            i === 0 ? "text-accent" : "text-faint"
+                          }`}
+                        >
+                          {i === 0 ? "🥇" : i + 1}
+                        </span>
+                        <Avatar member={member} size="sm" ring={i === 0} />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-semibold">
+                            {member.name}
+                          </span>
+                          <span className="bg-sunk mt-1 block h-1.5 overflow-hidden rounded-full">
+                            <span
+                              className="block h-full rounded-full"
+                              style={{
+                                width: topChores > 0 ? `${(row.chores / topChores) * 100}%` : "0%",
+                                backgroundColor: member.color,
+                              }}
+                            />
+                          </span>
+                        </span>
+                        <span className="shrink-0 text-right">
+                          <span className="block text-sm font-bold tabular-nums">
+                            {row.chores}
+                          </span>
+                          <span className="text-faint block text-[10px] tabular-nums">
+                            {row.points} {row.points === 1 ? "point" : "points"}
+                          </span>
+                        </span>
+                      </li>
+                    );
+                  })}
+                  {/* Somebody who has not done a chore in the window still
+                      belongs on the table — a missing row reads as a loading
+                      bug, a zero reads as a fact. */}
+                  {members
+                    .filter((m) => !totals.some((t) => t.memberId === m.id))
+                    .map((m) => (
+                      <li key={m.id} className="flex items-center gap-3 px-4 py-2.5 opacity-60">
+                        <span className="text-faint w-5 shrink-0 text-center text-xs font-bold">
+                          –
+                        </span>
+                        <Avatar member={m} size="sm" />
+                        <span className="min-w-0 flex-1 truncate text-sm font-semibold">
+                          {m.name}
+                        </span>
+                        <span className="text-faint shrink-0 text-xs tabular-nums">0</span>
+                      </li>
+                    ))}
+                </ol>
+              </Card>
+
+              <Card className="overflow-hidden">
+                <p className="border-line text-muted border-b px-4 py-2.5 text-xs font-semibold">
+                  Recently done
+                </p>
+                <ul className="divide-line max-h-96 divide-y overflow-y-auto">
+                  {entries.map((e) => {
+                    const who = e.tick.done_by ? byId[e.tick.done_by] : null;
+                    const at = parseISO(e.tick.done_at);
+                    return (
+                      <li key={e.tick.id} className="flex items-center gap-3 px-4 py-2.5">
+                        <span className="bg-sunk grid h-8 w-8 shrink-0 place-items-center rounded-lg text-base" aria-hidden>
+                          {e.icon}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-medium">{e.title}</span>
+                          <span className="text-faint block text-xs">
+                            {who ? `${who.name} · ` : ""}
+                            {formatDayLabel(at)} · {formatTime(at)}
+                          </span>
+                        </span>
+                        <span className="text-muted shrink-0 text-xs font-semibold tabular-nums">
+                          +{e.tick.points ?? 1}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </Card>
+            </>
+          )}
+        </div>
+      ) : null}
+    </section>
   );
 }
 
 /* --------------------------------------------------------------------- tab */
 
 export function ChoresTab() {
-  const { tickFor, setDoneBy, scores, progress, loading, error } = useChores();
+  const { ticksFor, toggleMember, scores, progress, loading, error } = useChores();
 
   const pct = progress.total === 0 ? 0 : Math.round((progress.done / progress.total) * 100);
 
@@ -265,8 +480,9 @@ export function ChoresTab() {
         </p>
         <h2 className="mt-1 text-2xl font-bold tracking-tight">Chore board</h2>
         <p className="text-muted mt-0.5 text-sm">
-          Nothing is assigned. Do a chore, tap your name, take the point — most points
-          by Sunday night wins the week.
+          Nothing is assigned. Do a chore, tap your name, take the points — most points
+          by Sunday night wins the week. Some jobs are worth two, and the ones done
+          several times a day take as many names as helped.
         </p>
       </div>
 
@@ -324,14 +540,16 @@ export function ChoresTab() {
                     <ChoreCard
                       key={chore.key}
                       chore={chore}
-                      tick={tickFor(chore)}
-                      onSetDoneBy={(memberId) => void setDoneBy(chore, memberId)}
+                      ticks={ticksFor(chore)}
+                      onToggleMember={(memberId) => void toggleMember(chore, memberId)}
                     />
                   ))}
                 </div>
               </section>
             );
           })}
+
+          <History />
         </>
       )}
     </div>

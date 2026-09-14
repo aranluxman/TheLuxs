@@ -2,18 +2,26 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { useCalendarEntries } from "@/hooks/useCalendarEntries";
+import { usePrefs } from "@/hooks/usePrefs";
 import { useCalendarAutoSync } from "@/hooks/useCalendarFeeds";
 import { useEvents } from "@/hooks/useEvents";
 import {
   addDays,
+  addMonths,
+  addWeeks,
   dayKey,
   format,
   formatDayLabel,
   formatTime,
   isSameDay,
+  isSameMonth,
+  monthGridDays,
   parseDayKey,
   parseISO,
+  startOfMonth,
+  startOfWeekMon,
   toLocalInputValue,
+  weekDaysOf,
 } from "@/lib/dates";
 import { CALENDAR_CATEGORIES, categoryStyle, tint } from "@/lib/palette";
 import type { AgendaItem, CalendarEntry, EventRsvp, FamilyEvent } from "@/lib/types";
@@ -21,6 +29,7 @@ import { CalendarFeeds } from "./CalendarFeeds";
 import { useFamily } from "./FamilyProvider";
 import { PhotoWall } from "./PhotoWall";
 import { TodayCard } from "./TodayCard";
+import { WeatherCard } from "./WeatherCard";
 import {
   Avatar,
   Button,
@@ -380,13 +389,140 @@ function AgendaRow({
   );
 }
 
+/* -------------------------------------------------------------- Grid view */
+
+/**
+ * The calendar as a calendar.
+ *
+ * The agenda list answers "what is on today and this week" — it is the right
+ * shape for a phone and the wrong shape for "are we free the last weekend of
+ * the month", which is a question about the *shape* of a month and needs to be
+ * seen as one. So both exist, and the choice sits at the top where it can be
+ * made in one tap.
+ *
+ * Spans a month or a single week. The week is not a smaller month: with seven
+ * columns and one row it has the height to list every item in full, which is
+ * what makes it the view for planning the week ahead rather than skimming it.
+ */
+const WEEKDAY_INITIALS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+/** How many items a month cell shows before it gives up and counts them. */
+const MONTH_CELL_LIMIT = 3;
+
+function GridChip({ item, onOpen }: { item: AgendaItem; onOpen: () => void }) {
+  const { byId } = useFamily();
+  const owner = item.memberIds.map((id) => byId[id]).find(Boolean);
+  const color = owner?.color ?? "#a8a29e";
+
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      title={`${item.start ? `${formatTime(item.start)} · ` : ""}${item.title}`}
+      className="hover:bg-sunk flex w-full min-w-0 items-center gap-1 rounded px-1 py-0.5 text-left text-[11px] leading-tight"
+    >
+      <span
+        className="h-1.5 w-1.5 shrink-0 rounded-full"
+        style={{ backgroundColor: color }}
+        aria-hidden
+      />
+      {item.start ? (
+        <span className="text-faint shrink-0 tabular-nums">{format(item.start, "h:mm")}</span>
+      ) : null}
+      <span className="min-w-0 truncate">{item.title}</span>
+    </button>
+  );
+}
+
+function CalendarGrid({
+  span,
+  anchor,
+  itemsByDay,
+  onOpen,
+}: {
+  span: "month" | "week";
+  anchor: Date;
+  itemsByDay: Map<string, AgendaItem[]>;
+  onOpen: (item: AgendaItem) => void;
+}) {
+  const days = span === "month" ? monthGridDays(anchor) : weekDaysOf(anchor);
+  const today = new Date();
+
+  return (
+    <Card className="overflow-hidden">
+      <div className="border-line text-faint grid grid-cols-7 border-b text-center text-[10px] font-bold tracking-[0.08em] uppercase">
+        {WEEKDAY_INITIALS.map((d) => (
+          <span key={d} className="py-2">
+            {/* Three letters do not fit seven columns on a 390px phone. */}
+            <span className="sm:hidden">{d[0]}</span>
+            <span className="hidden sm:inline">{d}</span>
+          </span>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-7">
+        {days.map((date) => {
+          const key = dayKey(date);
+          const items = itemsByDay.get(key) ?? [];
+          const isToday = isSameDay(date, today);
+          // Only the month view has days that belong to a neighbouring month;
+          // in the week view every cell is in the week by construction.
+          const outside = span === "month" && !isSameMonth(date, anchor);
+          const shown = span === "month" ? items.slice(0, MONTH_CELL_LIMIT) : items;
+
+          return (
+            <div
+              key={key}
+              className={`border-line min-h-24 border-t border-l p-1 first:border-l-0 ${
+                span === "week" ? "sm:min-h-64" : ""
+              } ${outside ? "bg-sunk/40" : ""}`}
+            >
+              <p
+                className={`mb-0.5 px-1 text-[11px] font-semibold tabular-nums ${
+                  isToday
+                    ? "bg-accent text-on-ink inline-block rounded-full px-1.5"
+                    : outside
+                      ? "text-faint"
+                      : "text-muted"
+                }`}
+              >
+                {format(date, "d")}
+              </p>
+
+              <div className="space-y-0.5">
+                {shown.map((i) => (
+                  <GridChip key={i.id} item={i} onOpen={() => onOpen(i)} />
+                ))}
+                {items.length > shown.length ? (
+                  <p className="text-faint px-1 text-[10px] font-semibold">
+                    +{items.length - shown.length} more
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
 /* ------------------------------------------------------------------- Tab */
 
 export function CalendarTab() {
   const { members, currentMember } = useFamily();
 
+  const { prefs } = usePrefs();
+
   const [person, setPerson] = useState<PersonFilter>(null);
   const [range, setRange] = useState<RangeId>("4w");
+  // Which view the tab opens on is a per-device setting, read once as the
+  // initial value: changing it in Settings should not flip the calendar out
+  // from under whoever is reading it, the same rule the start tab follows.
+  const [view, setView] = useState<"list" | "grid">(() => prefs.calendarView);
+  const [span, setSpan] = useState<"month" | "week">("month");
+  /** Which month or week the grid is showing. The list view ignores it. */
+  const [anchor, setAnchor] = useState<Date>(() => new Date());
   const [visibleDays, setVisibleDays] = useState(DAYS_PER_PAGE);
   const [open, setOpen] = useState(false);
   const [feedsOpen, setFeedsOpen] = useState(false);
@@ -465,6 +601,24 @@ export function CalendarTab() {
     [upcoming, person],
   );
 
+  /**
+   * The grid is not bounded by the range control: it shows a month or a week,
+   * whichever the arrows have landed on, so it reads from the whole agenda
+   * rather than from `upcoming`. That is also what lets it show the past — a
+   * month view that blanked out everything before today would be a strange
+   * thing to hand somebody.
+   */
+  const gridByDay = useMemo(() => {
+    const map = new Map<string, AgendaItem[]>();
+    for (const i of agenda) {
+      if (!belongsTo(i, person)) continue;
+      const bucket = map.get(i.day);
+      if (bucket) bucket.push(i);
+      else map.set(i.day, [i]);
+    }
+    return map;
+  }, [agenda, person]);
+
   const byDay = useMemo(() => {
     const map = new Map<string, AgendaItem[]>();
     for (const i of visible) {
@@ -522,11 +676,15 @@ export function CalendarTab() {
 
       <TodayCard />
 
+      {/* Directly under the date, because "what is it doing out there" is read
+          in the same glance as "what day is it" on the way out of the door. */}
+      <WeatherCard />
+
       {/* Above the agenda rather than below it. The schedule has the stronger
           claim on the fold, but a photo wall nobody scrolls to is a photo wall
           nobody posts to — and posting is the half of this that only works if
           people find it. */}
-      <PhotoWall />
+      {prefs.showPhotos ? <PhotoWall /> : null}
 
       {/* ----------------------------------------------------------- header */}
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -536,15 +694,59 @@ export function CalendarTab() {
             {activePerson ? `${activePerson.name}'s schedule` : "What's coming up"}
           </h2>
           <p className="text-faint mt-0.5 text-xs">
-            Next {RANGES.find((r) => r.id === range)!.label}
+            {view === "grid"
+              ? span === "month"
+                ? format(anchor, "MMMM yyyy")
+                : `Week of ${format(startOfWeekMon(anchor), "MMM d")}`
+              : `Next ${RANGES.find((r) => r.id === range)!.label}`}
             {lastSyncedAt
               ? ` · feeds synced ${format(new Date(lastSyncedAt), "h:mm a")}`
               : null}
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <div className="bg-sunk inline-flex rounded-xl p-1 shadow-inner" role="group" aria-label="Range">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* List or grid, first: it changes what every other control in this
+              row means, so it reads left to right as "how, then how much". */}
+          <div className="bg-sunk inline-flex rounded-xl p-1 shadow-inner" role="group" aria-label="View">
+            {(["list", "grid"] as const).map((v) => (
+              <button
+                key={v}
+                onClick={() => setView(v)}
+                aria-pressed={view === v}
+                className={`rounded-lg px-2.5 py-1.5 text-xs font-medium whitespace-nowrap transition-colors ${
+                  view === v ? "bg-surface text-ink shadow-sm" : "text-muted"
+                }`}
+                aria-label={v === "list" ? "Show the agenda list" : "Show the calendar grid"}
+              >
+                <span aria-hidden>{v === "list" ? "☰ " : "▦ "}</span>
+                {v === "list" ? "List" : "Grid"}
+              </button>
+            ))}
+          </div>
+
+          {view === "grid" ? (
+            <div className="bg-sunk inline-flex rounded-xl p-1 shadow-inner" role="group" aria-label="How much at a time">
+              {(["month", "week"] as const).map((sp) => (
+                <button
+                  key={sp}
+                  onClick={() => setSpan(sp)}
+                  aria-pressed={span === sp}
+                  className={`rounded-lg px-2.5 py-1.5 text-xs font-medium whitespace-nowrap capitalize transition-colors ${
+                    span === sp ? "bg-surface text-ink shadow-sm" : "text-muted"
+                  }`}
+                >
+                  {sp}
+                </button>
+              ))}
+            </div>
+          ) : null}
+
+          <div
+            className={`bg-sunk rounded-xl p-1 shadow-inner ${view === "list" ? "inline-flex" : "hidden"}`}
+            role="group"
+            aria-label="Range"
+          >
             {RANGES.map((r) => (
               <button
                 key={r.id}
@@ -616,7 +818,57 @@ export function CalendarTab() {
       </div>
 
       {/* ------------------------------------------------------------ agenda */}
-      {byDay.length === 0 ? (
+      {view === "grid" ? (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() =>
+                setAnchor((d) => (span === "month" ? addMonths(d, -1) : addWeeks(d, -1)))
+              }
+              className="border-line bg-surface text-ink hover:bg-sunk grid h-9 w-9 place-items-center rounded-full border text-sm"
+              aria-label={span === "month" ? "Previous month" : "Previous week"}
+            >
+              ‹
+            </button>
+            <button
+              onClick={() =>
+                setAnchor((d) => (span === "month" ? addMonths(d, 1) : addWeeks(d, 1)))
+              }
+              className="border-line bg-surface text-ink hover:bg-sunk grid h-9 w-9 place-items-center rounded-full border text-sm"
+              aria-label={span === "month" ? "Next month" : "Next week"}
+            >
+              ›
+            </button>
+            <p className="text-sm font-semibold">
+              {span === "month"
+                ? format(anchor, "MMMM yyyy")
+                : `${format(startOfWeekMon(anchor), "MMM d")} – ${format(
+                    addDays(startOfWeekMon(anchor), 6),
+                    "MMM d",
+                  )}`}
+            </p>
+            <Button
+              variant="ghost"
+              className="ml-auto min-h-9 px-3 py-1.5 text-xs"
+              onClick={() => setAnchor(new Date())}
+            >
+              Today
+            </Button>
+          </div>
+
+          <CalendarGrid
+            span={span}
+            anchor={span === "month" ? startOfMonth(anchor) : anchor}
+            itemsByDay={gridByDay}
+            onOpen={setDetail}
+          />
+
+          <p className="text-faint text-xs">
+            Tap anything to see the full details.
+          </p>
+        </div>
+      ) : byDay.length === 0 ? (
+
         <Card>
           <EmptyState
             icon="🗓️"

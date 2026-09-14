@@ -147,23 +147,52 @@ export interface ShoppingItem {
 /**
  * One entry on the To Do's board.
  *
- * `assigned_to` null means the whole house, the same way `recipient_id` null
- * means the group thread — the unassigned case is the common one, and a
- * sentinel member row would make every read join against something fake.
+ * `assignee_ids` empty means the whole house, the same way `recipient_id` null
+ * means the group thread. When it names people, the task is theirs and the
+ * author's: `visibleTo` below is what the board filters on. That filter is a
+ * courtesy, not a security boundary — there is no login, so every browser is
+ * still sent every row. See migration 0015 and the README's Security model.
  *
  * `due_on` is a plain `YYYY-MM-DD` day, not a timestamp: a task is due on a
  * day, and storing an instant makes "is this overdue" a question about clocks
  * instead of calendars.
+ *
+ * `estimate_minutes` is how long the job is expected to take. Minutes rather
+ * than free text, so the board can total them up and say what an evening
+ * actually costs.
  */
 export interface Todo {
   id: string;
   title: string;
-  assigned_to: string | null;
+  assignee_ids: string[];
   due_on: string | null;
+  estimate_minutes: number | null;
   created_by: string | null;
   created_at: string;
   done_at: string | null;
   done_by: string | null;
+}
+
+/**
+ * Whether `memberId` is meant to see this task.
+ *
+ * Unassigned tasks are the whole house's. A task naming people is visible to
+ * exactly those people and whoever wrote it — and, so that a shared tablet
+ * with nobody signed in is not a blank screen full of secrets, to nobody else.
+ */
+export function todoVisibleTo(todo: Todo, memberId: string | null): boolean {
+  if (todo.assignee_ids.length === 0) return true;
+  if (!memberId) return false;
+  return todo.assignee_ids.includes(memberId) || todo.created_by === memberId;
+}
+
+/** "45m", "1h", "1h 30m" — the estimate as it reads on a card. */
+export function formatEstimate(minutes: number | null): string | null {
+  if (!minutes || minutes <= 0) return null;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (!h) return `${m}m`;
+  return m ? `${h}h ${m}m` : `${h}h`;
 }
 
 export interface Quote {
@@ -243,10 +272,14 @@ export interface AgendaItem {
  * cadence, so the key is derived on the client rather than stored per row.
  */
 export interface ChoreTick {
+  /** Surrogate key since 0016 — several people can sign up for one chore. */
+  id: string;
   chore_key: string;
   period_key: string;
   done_by: string | null;
   done_at: string;
+  /** What the chore was worth when it was done. Never re-derived. */
+  points: number;
 }
 
 /** A photo on the family wall, plus the short-lived signed URL for it. */

@@ -5,7 +5,7 @@ import { usePhotos } from "@/hooks/usePhotos";
 import { format, parseISO } from "@/lib/dates";
 import type { PhotoWithUrl } from "@/lib/types";
 import { useFamily } from "./FamilyProvider";
-import { Avatar, Button, Card, ErrorNote, SectionTitle, inputClass } from "./ui";
+import { Avatar, Button, Card, ErrorNote, SectionTitle } from "./ui";
 
 /**
  * The family photo wall, on the home screen.
@@ -247,18 +247,27 @@ export function PhotoWall() {
   const { currentMember } = useFamily();
   const { photos, loading, uploading, error, addPhotos, removePhoto } = usePhotos();
 
-  const [caption, setCaption] = useState("");
   const [dragging, setDragging] = useState(false);
   const [open, setOpen] = useState<PhotoWithUrl | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
 
+  /**
+   * Photos go up as they are picked, with no caption box in the way.
+   *
+   * There used to be one, and it was asked for and then asked to go: in
+   * practice it was a field nobody filled in that stood between "I have a
+   * photo" and the photo being on the wall. Captions already on existing
+   * photos are still shown wherever they appear — the column stays, only the
+   * input is gone.
+   */
   async function take(files: FileList | null) {
     if (!files || files.length === 0) return;
-    await addPhotos([...files], caption, currentMember?.id ?? null);
-    setCaption("");
-    // Clearing the input matters: picking the same file twice in a row is a
+    await addPhotos([...files], "", currentMember?.id ?? null);
+    // Clearing the inputs matters: picking the same file twice in a row is a
     // no-op otherwise, because `change` never fires for an unchanged value.
     if (fileRef.current) fileRef.current.value = "";
+    if (cameraRef.current) cameraRef.current.value = "";
   }
 
   const empty = !loading && photos.length === 0;
@@ -267,13 +276,24 @@ export function PhotoWall() {
     <section>
       <SectionTitle
         action={
-          <Button
-            onClick={() => fileRef.current?.click()}
-            disabled={uploading}
-            className="min-h-9 px-3 py-1.5 text-xs"
-          >
-            {uploading ? "Uploading…" : "＋ Add photos"}
-          </Button>
+          <span className="flex items-center gap-1.5">
+            <Button
+              variant="ghost"
+              onClick={() => cameraRef.current?.click()}
+              disabled={uploading}
+              className="min-h-9 px-3 py-1.5 text-xs"
+              title="Take a photo"
+            >
+              📷 Camera
+            </Button>
+            <Button
+              onClick={() => fileRef.current?.click()}
+              disabled={uploading}
+              className="min-h-9 px-3 py-1.5 text-xs"
+            >
+              {uploading ? "Uploading…" : "＋ Add photos"}
+            </Button>
+          </span>
         }
       >
         Family photos
@@ -281,11 +301,25 @@ export function PhotoWall() {
 
       <ErrorNote message={error} />
 
+      {/* Two inputs rather than one, because `capture` is not a mode you can
+          toggle on a single element: with it, a phone opens the camera and
+          never offers the camera roll; without it, it offers the roll (and, on
+          iOS, "Take Photo" inside the same sheet). Both paths matter — most
+          photos are already on the phone, and some are the thing that is
+          happening right now. */}
       <input
         ref={fileRef}
         type="file"
         accept="image/*"
         multiple
+        className="hidden"
+        onChange={(e) => void take(e.target.files)}
+      />
+      <input
+        ref={cameraRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
         className="hidden"
         onChange={(e) => void take(e.target.files)}
       />
@@ -305,20 +339,6 @@ export function PhotoWall() {
           void take(e.dataTransfer.files);
         }}
       >
-        {/* One caption for the batch — it is almost always describing the
-            occasion ("Sahana's meet") rather than the individual frame. */}
-        <label htmlFor="photo-caption" className="sr-only">
-          Caption for the next photos
-        </label>
-        <input
-          id="photo-caption"
-          value={caption}
-          onChange={(e) => setCaption(e.target.value)}
-          placeholder="Caption (optional) — added to the next photos you pick"
-          maxLength={140}
-          className={`${inputClass} mb-3`}
-        />
-
         {loading ? (
           <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-6" role="status" aria-label="Loading photos">
             <span className="skeleton block aspect-square rounded-lg" />
@@ -333,8 +353,8 @@ export function PhotoWall() {
             </span>
             <p className="text-sm font-medium">No photos on the wall yet</p>
             <p className="text-muted max-w-xs text-xs">
-              Drop them here, or pick some from your phone. Everyone in the house sees
-              them straight away.
+              Drop them here, pick some from your camera roll, or take one now.
+              Everyone in the house sees them straight away.
             </p>
             <Button variant="ghost" onClick={() => fileRef.current?.click()} disabled={uploading}>
               {uploading ? "Uploading…" : "Choose photos"}

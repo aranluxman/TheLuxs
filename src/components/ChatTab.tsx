@@ -498,6 +498,14 @@ export function ChatTab() {
   const [todoStates, setTodoStates] = useState<Record<string, "saving" | "done">>({});
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  /* Three pickers, not one. `capture` cannot be toggled on a single input —
+     with it a phone opens the camera and never offers the camera roll, without
+     it the roll — and `accept="image/*"` is what makes the roll the first thing
+     iOS shows instead of the Files app. So: the roll, the camera, and anything
+     at all, each with its own element. */
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const [attachOpen, setAttachOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const pinnedToBottom = useRef(true);
 
@@ -650,7 +658,7 @@ export function ChatTab() {
     if (!text || todoStateFor(message.id) !== "idle") return;
 
     setTodoStates((prev) => ({ ...prev, [message.id]: "saving" }));
-    const result = await createTodo(text, null, null, currentMember?.id ?? null);
+    const result = await createTodo(text, [], null, currentMember?.id ?? null);
 
     if (!result.ok) {
       setUploadError(result.error);
@@ -933,16 +941,77 @@ export function ChatTab() {
             aria-hidden
             tabIndex={-1}
           />
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={!canSend}
-            className="border-line hover:bg-sunk grid h-11 w-11 shrink-0 place-items-center rounded-full border text-lg transition-colors disabled:opacity-40"
-            aria-label="Attach a file or photo"
-            title="Attach a file or photo"
-          >
-            📎
-          </button>
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept="image/*"
+            onChange={onFilePicked}
+            className="hidden"
+            aria-hidden
+            tabIndex={-1}
+          />
+          <input
+            ref={cameraInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            onChange={onFilePicked}
+            className="hidden"
+            aria-hidden
+            tabIndex={-1}
+          />
+
+          <div className="relative shrink-0">
+            <button
+              type="button"
+              onClick={() => setAttachOpen((v) => !v)}
+              disabled={!canSend}
+              aria-expanded={attachOpen}
+              aria-haspopup="menu"
+              className="border-line hover:bg-sunk grid h-11 w-11 place-items-center rounded-full border text-lg transition-colors disabled:opacity-40"
+              aria-label="Attach a photo or a file"
+              title="Attach a photo or a file"
+            >
+              📎
+            </button>
+
+            {attachOpen ? (
+              <>
+                {/* A click-away layer rather than a document listener: the menu
+                    is one tap deep and this keeps the whole thing local. */}
+                <button
+                  type="button"
+                  className="fixed inset-0 z-40 cursor-default"
+                  aria-label="Close the attach menu"
+                  onClick={() => setAttachOpen(false)}
+                />
+                <div
+                  role="menu"
+                  className="border-line bg-surface absolute bottom-13 left-0 z-50 w-44 overflow-hidden rounded-xl border shadow-lg"
+                >
+                  {[
+                    { label: "Photo library", icon: "🖼️", ref: photoInputRef },
+                    { label: "Take a photo", icon: "📷", ref: cameraInputRef },
+                    { label: "File", icon: "📄", ref: fileInputRef },
+                  ].map((option) => (
+                    <button
+                      key={option.label}
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setAttachOpen(false);
+                        option.ref.current?.click();
+                      }}
+                      className="hover:bg-sunk flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm font-medium"
+                    >
+                      <span aria-hidden>{option.icon}</span>
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : null}
+          </div>
 
           <textarea
             value={draft}

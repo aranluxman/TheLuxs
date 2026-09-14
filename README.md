@@ -1,8 +1,8 @@
 # Family Dashboard
 
-A shared calendar, a chore board, a shopping list, a photo wall and a group
-chat for a five-person household — one page, five tabs, live on every device
-in the house.
+A shared calendar, a to-do board, a chore board, a shopping list, a photo wall
+and a group chat for a five-person household — one page, six tabs, live on
+every device in the house.
 
 The **photo wall sits on the home screen**, directly under the day's summary:
 pick photos or drop them onto the card and everyone sees them straight away.
@@ -16,19 +16,20 @@ Built with **Next.js 16 (App Router, TypeScript)**, **Tailwind CSS v4**,
 
 | Tab | What it does |
 | --- | --- |
-| **Calendar** | An agenda of what is actually coming up, over the next 2 weeks, 4 weeks or 3 months. Posted events and everyone's schedule entries merge into one chronological list, grouped by day. Tabs across the top switch between *Everyone* and one person, so anyone can pull up just their own week. Below the agenda sits the **photo wall**. |
-| **Chores** | The house chore board and a weekly points race. Nothing is assigned: every job is open to whoever gets to it, and you record who did one by tapping their face on the card. Each finished chore is worth a point, and the leaderboard at the top of the tab shows who is ahead this week. Daily chores reset at midnight, weekend ones on Monday morning. |
+| **Calendar** | What is coming up, in either of two shapes — a **list** (an agenda over the next 2 weeks, 4 weeks or 3 months, grouped by day) or a **grid** (a real month or week calendar you can page through). Posted events and everyone's schedule entries merge into one view; tabs across the top switch between *Everyone* and one person. The **weather** sits at the top, and the **photo wall** under it. |
+| **To Do's** | One-off jobs: what needs doing, who it is for, **how long it takes** and when it needs to be **done by**. A task can name several people, and one that names anybody is shown only to those people and whoever wrote it. Anything can be edited after the fact. |
+| **Chores** | The house chore board and a weekly points race. Nothing is assigned: every job is open to whoever gets to it, and you record who did one by tapping their face on the card. Most chores are worth a point; mopping, vacuuming and the washrooms are worth two. The jobs that get done several times a day take **as many names as helped**. There is a leaderboard for the week and a **history** for who has done the most over the last month, three months or ever. |
 | **Shopping** | The shared list — add, tick off, clear what's done. |
-| **Settings** | One small column: the page colour, which tab the dashboard opens on, how wide the content runs, your name, photo and colour, and your PIN. Everything above the fold on a tablet. |
+| **Settings** | The page colour, text size, which tab the dashboard opens on and how the calendar opens, what shows on the calendar page, the weather and its units, message notifications, your name, photo and colour, and your PIN. |
 | **Chat** | An iMessage-style thread — grouped bubbles, day separators, timestamps, sender colours, and live delivery over Supabase Realtime. A row of faces above the messages switches between *Everyone* and a one-to-one conversation with any one person, with a dot on whichever conversations have moved on without you. Photos, files and voice notes attach to messages; tap any message to react with 👍 ❤️ 😂; you can delete your own. |
 
 Every screen also carries a **profile photo** per person, and the Calendar tab
-opens with a quote of the day, the next thing on the family's calendar, and
-what each person says they're looking forward to.
+opens with the date, a quote of the day and the current weather.
 
-The whole app ships **four themes** — Clean Light, Midnight Dark, Emerald
-Luxury and Navy Luxury — picked from the swatch button in the header, plus a
-*Match system* option. The choice persists per device.
+The whole app ships **nine themes** — Clean Light, Warm Sand, Blossom, High
+Contrast, Midnight Dark, Graphite, Emerald Luxury, Navy Luxury and Plum Velvet
+— picked from the swatch button in the header, plus a *Match system* option.
+The choice persists per device.
 
 You pick your face and enter your **PIN**; the device remembers you afterwards,
 so it is asked for once per phone rather than every visit. Someone else's phone
@@ -286,24 +287,80 @@ To deploy the function after changing it:
 npx supabase functions deploy family-sync-ical --project-ref <your-ref>
 ```
 
+### The To Do's board
+
+The chore board answers "what needs doing around the house, every week". This
+answers the other half: one-off jobs, with names on them, a day they need to be
+done by and — since the house asked — **how long they are expected to take**.
+
+Four things you can say about a task, all of them editable afterwards from the
+pencil on the row:
+
+| Field | What it means |
+| --- | --- |
+| Title | What needs doing |
+| Who it's for | Any number of people. Nobody picked means the whole house. |
+| How long it takes | Minutes. Five presets and a box; the open list totals them up, so the board can say what the evening costs. |
+| Done by | A calendar day, not a timestamp |
+
+**A task that names people is shown only to those people and whoever wrote
+it.** Read the next paragraph before treating that as privacy: it is the same
+courtesy the direct messages are. The SELECT policy is `using (true)` because
+there is no login, every browser is still sent every row, and the filter is a
+question the client asks rather than a rule the database enforces. See
+[Security model](#security-model).
+
+`assignee_ids` is a `uuid[]` rather than a junction table. The textbook shape
+would be a second table, and it would also mean a second query, a second
+realtime subscription and a join on every read of a board that never holds more
+than a few dozen rows. The array is the whole feature in one column that
+Realtime already carries. No foreign key is possible on an array element, so a
+member who leaves the house leaves their id behind; the client resolves ids
+through the member map and drops the ones it cannot find, exactly as a chore
+tick does.
+
+`due_on` is a `date`. A task is due on a day, not at an instant — storing a
+timestamp would push it across midnight for anyone in a different timezone and
+make "is this overdue" a question about clocks rather than calendars.
+
+Ticking does not delete. `done_at` is the whole state machine, so unticking is
+free and a finished list is a record of the week rather than an empty screen.
+
 ### The chore board
 
-Seven jobs, and none of them belong to anybody:
+Eight jobs, and none of them belong to anybody:
 
-| Chore | How often | Points a week |
-| --- | --- | --- |
-| Sweeping | Every day | 7 |
-| Wiping the table | Every day | 7 |
-| Unloading the dishwasher | Every day | 7 |
-| Washing the dishes | Every day | 7 |
-| Mopping | Weekends | 1 |
-| Vacuuming | Weekends | 1 |
-| Cleaning the washrooms | Weekends | 1 |
+| Chore | How often | Worth | Several people? |
+| --- | --- | --- | --- |
+| Sweeping | Every day | 1 | yes |
+| Wiping the table | Every day | 1 | yes |
+| Loading the dishwasher | Every day | 1 | yes |
+| Washing the dishes | Every day | 1 | yes |
+| Unloading the dishwasher | Every day | 1 | no |
+| Mopping | Weekends | 2 | no |
+| Vacuuming | Weekends | 2 | no |
+| Cleaning the washrooms | Weekends | 2 | no |
 
-**31 points are on the table each week.** Finishing a chore is worth one, and
-you claim it by tapping your own face on the card — every member's name is on
-every card. Tap a different face and the point moves to them; tap the
-highlighted one again and the chore reopens.
+**41 points are on the table each week** — five daily chores across seven days,
+plus three weekend jobs at two points each. You claim a chore by tapping your
+own face on the card; every member's name is on every card, and tapping your
+own face again takes it back off.
+
+Two things follow from the table above. **Not every chore is worth the same**:
+mopping the floors is not wiping the table, and a board that scored them
+equally quietly rewarded whoever got to the quick ones first. And **the jobs
+done several times a day take several names** — the dishes get washed after
+breakfast, after lunch and after dinner, rarely by the same person, and each of
+them earns the points. On a single-owner chore, tapping a different face still
+hands the whole thing over.
+
+A chore's worth is stamped onto the tick when it happens rather than looked up
+when the board paints, so re-pricing the roster next year does not re-score
+last March.
+
+**History** lives at the bottom of the tab, behind a button: every tick ever
+recorded, newest first, and a table of who has done the most over the last 30
+days, 3 months or all time — by number of chores first, points second.
 
 That "nothing is assigned" is the design, not a shortcut. A fixed roster and a
 points race are different products: if the sweeping is always Sahana's, her
@@ -312,16 +369,17 @@ leaderboard is the only account of who actually did the work — which is the
 whole reason the tab exists.
 
 The list itself lives in code, in [`src/lib/chores.ts`](src/lib/chores.ts),
-because it changes about once a year and by conversation. What the database
-holds is the *tick*: one row per (chore, period) saying it got done and who did
-it. There is nothing to generate ahead of time, nothing to backfill when the
+because it changes about once a year and by conversation — including which
+chores allow more than one name, which is a product decision rather than a
+constraint. What the database holds is the *tick*: one row per (chore, period,
+person) saying it got done, who did it and what it was worth. There is nothing to generate ahead of time, nothing to backfill when the
 list changes, and no period a chore can be missing from — an absent row is
 simply "not done yet".
 
 `period_key` is a local day (`2026-08-24`) for a daily chore and an ISO week
 (`2026-W35`) for a weekend one, which is what makes the board reset itself at
 midnight and on Monday morning without a scheduler, and what makes a daily
-chore worth seven points a week and a weekend one worth a single point. It is
+chore worth its value seven times over and a weekend one worth it once. It is
 computed on the client, because the client is the only party that knows the
 household's timezone; a server-side `now()` would file a Sunday-evening sweep
 under Monday for anyone west of UTC.
@@ -342,15 +400,18 @@ whoever is out of the house to undo their own mis-tap.
 
 ### Settings
 
-One narrow column of four small blocks, because everything in it is a thing you
+One narrow column of small blocks, because everything in it is a thing you
 change once and forget:
 
 | Block | What it holds | Where it lives |
 | --- | --- | --- |
-| **Page colour** | The four palettes plus *Match system* | `localStorage` |
-| **Layout** | Which tab the dashboard opens on; standard or wide content | `localStorage` |
+| **Page colour** | The nine palettes plus *Match system* | `localStorage` |
+| **Layout** | Which tab the dashboard opens on; standard or wide content; text size; whether the calendar opens as a list or a grid | `localStorage` |
+| **On the calendar page** | Whether the quote of the day and the photo wall are shown | `localStorage` |
+| **Weather** | On or off, °C/km or °F/mi, and where it reports from | `localStorage` |
+| **Notifications** | A banner when somebody messages you, and whether it makes a sound | `localStorage` + browser permission |
 | **You** | Your name, photo and colour | Postgres |
-| **Your PIN** | Set or change it; forget this device | Postgres |
+| **Your PIN** | Change it; forget this device | Postgres |
 
 The split is deliberate. Theme and layout describe *the screen you are holding*
 — the kitchen tablet wants the wide layout and to open on the calendar, a phone
@@ -362,20 +423,33 @@ household sees them.
 changing it in Settings would yank the tab out from under whoever is changing
 it; it takes effect on the next visit, which is what the words mean.
 
+Text size is applied as a root `font-size`, because every measurement in the
+app is in `rem` — one number moves the whole interface, including the things
+nobody would remember to add a class to.
+
 **A forgotten PIN cannot be reset from this screen, by design.** Changing one
 requires the current PIN, and clearing one outright is `family_admin_clear_pin`,
 which migration 0006 deliberately never granted to the browser. A self-serve
 reset would let anyone holding the tablet clear anyone else's PIN, which is
-precisely what the PIN exists to stop. The settings block says so rather than
-hiding it.
+precisely what the PIN exists to stop.
+
+The screen itself no longer says any of that. It shows two buttons — **Change
+PIN** and **Forget this device** — and nothing more: the paragraph that used to
+sit under them printed the recovery statement on the lock, which told every
+reader that a way in exists and what it is called. Whoever runs the database
+knows where it is; it is documented here instead.
 
 ### The photo wall
 
-Under the agenda on the home screen. Pick photos or drop them onto the card;
-each one is downscaled in the browser to 1600px on its longest edge before
-upload, so a phone album's worth of 4MB originals does not become 4MB down the
-wire every time the home screen paints. A caption typed before picking is
-applied to that batch.
+Under the agenda on the home screen. Pick photos from the camera roll, take one
+with **Camera**, or drop them onto the card; each is downscaled in the browser
+to 1600px on its longest edge before upload, so a phone album's worth of 4MB
+originals does not become 4MB down the wire every time the home screen paints.
+
+There is no caption box. There was, and it was a field nobody filled in
+standing between "I have a photo" and the photo being on the wall. Captions
+already on existing photos are still shown wherever they appear — the column
+stays, only the input is gone.
 
 The objects live under `photos/` in the same private `family-media` bucket as
 avatars and chat attachments, so every tile is a signed URL that expires — and,
@@ -387,6 +461,48 @@ used to delete it.
 Taking a photo down removes the row first and the object second: an object
 removed while a row still pointed at it would render as a permanently broken
 tile on every other device, whereas an orphaned object is invisible.
+
+### The weather
+
+One card at the top of the Calendar tab: what it is doing now, what it feels
+like, and a four-day strip. It comes from [Open-Meteo](https://open-meteo.com),
+which was chosen for one reason — it needs no API key. Everything else in this
+app is either Supabase or the browser, and a weather panel is not worth
+shipping a secret inside a static site to make it work.
+
+The forecast re-reads itself every fifteen minutes, because this dashboard
+lives on a kitchen tablet that is never reloaded, and the last answer is cached
+in `localStorage` so the card is never a spinner on a device that was showing
+it a minute ago. A failure is a small line of text, not a blank page: the
+house's wifi going out should not take the calendar with it.
+
+Where it reports from is a coordinate, not a place name — resolving a name
+would mean a geocoding service, which is a second thing to be down and a second
+thing to explain. It defaults to home, and *Use my location* asks the browser,
+rounded to three decimals (about 100m, far finer than a forecast grid and not a
+precise home address).
+
+### Message notifications
+
+A banner when somebody messages you or the group, and a sound if you want one.
+Both are per device, both are off until asked for, and the browser's own
+permission prompt is the gate — a setting that claims to be on while the
+browser has it blocked would be a lie the screen tells about itself, so the
+block says which of the two is refusing.
+
+The subscription lives in the shell rather than in the chat tab, which is the
+whole point: the chat's own subscription only exists while the chat is on
+screen, and the message worth being told about is by definition one that
+arrived while you were looking at something else.
+
+A **dot on the Chat tab** appears either way. Permission can be denied, a
+browser can lack notifications entirely, and the household should still be able
+to see that the conversation has moved.
+
+Direct messages are filtered exactly as the chat filters them — every browser
+is sent every row, because there is no login, and the ones that are not yours
+are dropped as a courtesy rather than as a boundary. A notification for someone
+else's DM would make that leak loud as well as visible.
 
 ### Housekeeping
 
@@ -439,6 +555,21 @@ Then run, in order:
   between conversations after the fact. **One-to-one chat needs this one.**
   Read its header before trusting it: it is honest that this adds a feature,
   not privacy.
+- `supabase/migrations/0013_chore_tick_upsert_grant.sql` — the column grants
+  the chore board's upsert needed. Superseded in practice by `0016`, which
+  stops upserting altogether, but harmless to run in order.
+- `supabase/migrations/0014_todos.sql` — the To Do's board. **The To Do's tab
+  needs this one**; without it every task fails with *Could not find the table
+  'public.family_todos' in the schema cache*.
+- `supabase/migrations/0015_todos_detail.sql` — several people per task, how
+  long it takes, and the column grants that let a task be edited after the
+  fact. **The To Do's tab needs this one too**; it replaces `assigned_to` with
+  `assignee_ids`, backfilling it first.
+- `supabase/migrations/0016_chore_signups_points.sql` — several people per
+  chore, and chores worth more than one point. **The Chores tab needs this
+  one**; it swaps the composite primary key for a surrogate `id`, which is what
+  makes more than one sign-up per chore per period possible. Existing ticks
+  carry over untouched and score the 1 point they were worth.
 
 All of them are idempotent — safe to re-run. `0001`–`0003` leave you with:
 

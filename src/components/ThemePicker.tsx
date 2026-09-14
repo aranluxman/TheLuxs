@@ -7,7 +7,7 @@ import { useTheme } from "./ThemeProvider";
 /**
  * The palette switcher.
  *
- * A toggle was enough when there were two states. Four named palettes plus
+ * A toggle was enough when there were two states. Nine named palettes plus
  * "match my system" need names, a description and a preview, so this is a
  * proper menu — and the preview is the point: nobody picks "Emerald" from a
  * word, they pick it from the three dots next to it.
@@ -79,7 +79,10 @@ export function ThemePicker() {
             Theme
           </p>
 
-          <div className="p-1.5">
+          {/* Capped and scrollable: the list grows every time somebody wants
+              another palette, and a menu taller than a phone cannot reach its
+              own last item. */}
+          <div className="max-h-[60vh] overflow-y-auto p-1.5">
             {THEMES.map((t) => {
               const active = preference === t.id;
               return (

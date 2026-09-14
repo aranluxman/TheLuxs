@@ -1,16 +1,31 @@
 "use client";
 
 import { useRef, useState } from "react";
+import {
+  notificationPermission,
+  requestNotificationPermission,
+  type NotificationPermissionState,
+} from "@/hooks/useMessageNotifications";
 import { usePrefs } from "@/hooks/usePrefs";
 import { useProfileLock } from "@/hooks/useProfileLock";
 import { downscaleImage } from "@/lib/image";
 import { MEMBER_COLORS } from "@/lib/palette";
 import {
+  CALENDAR_VIEWS,
+  CALENDAR_VIEW_LABELS,
+  DEFAULT_PLACE,
   START_TABS,
   START_TAB_LABELS,
+  TEXT_SIZES,
+  TEXT_SIZE_LABELS,
+  UNITS,
+  UNITS_LABELS,
   WIDTHS,
   WIDTH_LABELS,
+  type CalendarView,
   type StartTab,
+  type TextSize,
+  type Units,
   type Width,
 } from "@/lib/prefs";
 import { THEMES, type ThemePreference } from "@/lib/themes";
@@ -84,6 +99,213 @@ function Choice<T extends string>({
         );
       })}
     </div>
+  );
+}
+
+/**
+ * A labelled on/off row. The only other control this tab needs, and the one
+ * every "show me less of this" setting is made of.
+ */
+function Toggle({
+  label,
+  hint,
+  checked,
+  onChange,
+  disabled,
+}: {
+  label: string;
+  hint?: string;
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <label
+      className={`flex items-start gap-3 py-1.5 ${disabled ? "opacity-50" : "cursor-pointer"}`}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.checked)}
+        className="peer sr-only"
+      />
+      <span
+        className="tick-box peer-focus-visible:ring-accent/50 mt-0.5 peer-focus-visible:ring-2 peer-focus-visible:ring-offset-2"
+        data-done={checked}
+        aria-hidden
+      >
+        <svg viewBox="0 0 24 24">
+          <path d="M5 12.5 10 17.5 19 7" />
+        </svg>
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-medium">{label}</span>
+        {hint ? <span className="text-faint block text-xs">{hint}</span> : null}
+      </span>
+    </label>
+  );
+}
+
+/* --------------------------------------------------------------- weather */
+
+/**
+ * Where the weather panel reports from.
+ *
+ * A coordinate box rather than a place search: resolving a name means a
+ * geocoding service, which is a second thing that can be down and a second
+ * thing to explain. "Use my location" covers the case anyone actually has, and
+ * the default is home.
+ */
+function WeatherBlock() {
+  const { prefs, setPrefs } = usePrefs();
+  const [locating, setLocating] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+
+  function useMyLocation() {
+    if (!("geolocation" in navigator)) {
+      setNote("This device will not share a location.");
+      return;
+    }
+    setLocating(true);
+    setNote(null);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setPrefs({
+          weatherPlace: {
+            label: "Here",
+            // Three decimals is about 100m, which is far finer than a forecast
+            // grid and keeps the stored value from being a precise home address.
+            lat: Number(pos.coords.latitude.toFixed(3)),
+            lon: Number(pos.coords.longitude.toFixed(3)),
+          },
+        });
+        setLocating(false);
+        setNote("Using this device's location.");
+      },
+      () => {
+        setLocating(false);
+        setNote("The browser would not share a location.");
+      },
+      { timeout: 10_000 },
+    );
+  }
+
+  const isHome =
+    prefs.weatherPlace.lat === DEFAULT_PLACE.lat && prefs.weatherPlace.lon === DEFAULT_PLACE.lon;
+
+  return (
+    <Block title="Weather" hint="Shown at the top of the calendar.">
+      <Toggle
+        label="Show the weather"
+        checked={prefs.showWeather}
+        onChange={(showWeather) => setPrefs({ showWeather })}
+      />
+
+      <div className="border-line mt-2 border-t pt-2.5">
+        <p className="text-faint mb-1.5 text-xs">Units</p>
+        <Choice<Units>
+          options={UNITS}
+          value={prefs.units}
+          onChange={(units) => setPrefs({ units })}
+          label={(o) => UNITS_LABELS[o]}
+        />
+      </div>
+
+      <div className="border-line mt-3 border-t pt-2.5">
+        <p className="text-faint mb-1.5 text-xs">
+          Reporting from <span className="text-ink font-medium">{prefs.weatherPlace.label}</span>
+        </p>
+        <div className="flex flex-wrap gap-1.5">
+          <button
+            onClick={() => setPrefs({ weatherPlace: DEFAULT_PLACE })}
+            aria-pressed={isHome}
+            className={`min-h-9 rounded-lg border px-3 text-xs font-semibold transition-colors ${
+              isHome ? "border-ink bg-ink text-on-ink" : "border-line text-muted hover:bg-sunk"
+            }`}
+          >
+            {DEFAULT_PLACE.label}
+          </button>
+          <button
+            onClick={useMyLocation}
+            disabled={locating}
+            className="border-line text-muted hover:bg-sunk min-h-9 rounded-lg border px-3 text-xs font-semibold transition-colors disabled:opacity-50"
+          >
+            {locating ? "Finding…" : "Use my location"}
+          </button>
+        </div>
+        {note ? (
+          <p className="text-faint mt-1.5 text-[11px]" role="status">
+            {note}
+          </p>
+        ) : null}
+      </div>
+    </Block>
+  );
+}
+
+/* ---------------------------------------------------------- notifications */
+
+function NotificationsBlock() {
+  const { prefs, setPrefs } = usePrefs();
+  // Read once into state rather than on every render: `Notification.permission`
+  // is a browser global, and reading it during render would make this component
+  // render differently on the server than on the client.
+  const [permission, setPermission] = useState<NotificationPermissionState>("default");
+  const [checked, setChecked] = useState(false);
+
+  if (!checked) {
+    setChecked(true);
+    setPermission(notificationPermission());
+  }
+
+  const blocked = permission === "denied";
+  const unsupported = permission === "unsupported";
+
+  async function enable() {
+    const next = await requestNotificationPermission();
+    setPermission(next);
+    if (next === "granted") setPrefs({ notifyMessages: true });
+  }
+
+  return (
+    <Block title="Notifications" hint="Only on this device.">
+      <Toggle
+        label="Tell me about new messages"
+        hint={
+          unsupported
+            ? "This browser cannot show notifications."
+            : blocked
+              ? "Blocked in the browser's site settings — turn it back on there first."
+              : permission === "granted"
+                ? "A banner when somebody messages you or the group."
+                : "Needs permission first."
+        }
+        checked={prefs.notifyMessages && permission === "granted"}
+        disabled={unsupported || blocked}
+        onChange={(on) => {
+          if (!on) {
+            setPrefs({ notifyMessages: false });
+            return;
+          }
+          if (permission === "granted") setPrefs({ notifyMessages: true });
+          else void enable();
+        }}
+      />
+
+      <Toggle
+        label="Play a sound"
+        hint="Off by default — a kitchen is loud enough."
+        checked={prefs.notifySound}
+        disabled={!prefs.notifyMessages || permission !== "granted"}
+        onChange={(notifySound) => setPrefs({ notifySound })}
+      />
+
+      <p className="text-faint border-line mt-2 border-t pt-2.5 text-[11px]">
+        The dot on the Chat tab appears either way — it needs no permission, and
+        it is what the house sees if this is switched off.
+      </p>
+    </Block>
   );
 }
 
@@ -289,40 +511,39 @@ function PinBlock() {
           </div>
         </form>
       ) : (
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-          <button
+        // Two plain buttons and nothing else.
+        //
+        // There used to be a paragraph here explaining that a forgotten PIN can
+        // only be cleared from the Supabase SQL editor, with the statement to
+        // run. It was true and it is still true — there is deliberately no
+        // self-serve reset, because one would let anyone holding the tablet
+        // clear anyone else's — but printing the recovery path on the lock
+        // itself told every reader that a way in exists and what it is called.
+        // The people who need it know where it is.
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
             onClick={() => {
               setOpen(true);
               setNote(null);
             }}
-            className="text-accent text-xs font-semibold"
+            className="min-h-9 py-1.5 text-xs"
           >
             {hasPin ? "Change PIN" : "Set a PIN"}
-          </button>
+          </Button>
           {hasPin ? (
-            <button
+            <Button
+              variant="ghost"
               onClick={async () => {
                 await forgetThisDevice(me.id);
                 setNote("This device will ask for your PIN again.");
               }}
-              className="text-faint hover:text-ink text-xs"
+              className="min-h-9 py-1.5 text-xs"
             >
               Forget this device
-            </button>
+            </Button>
           ) : null}
         </div>
       )}
-
-      {hasPin ? (
-        // Said plainly rather than hidden: a self-serve reset for a PIN you
-        // cannot remember would let anyone holding the tablet clear anyone
-        // else's, which is exactly what the PIN is for.
-        <p className="text-faint border-line mt-3 border-t pt-2.5 text-[11px]">
-          Forgotten it? It can only be cleared from the Supabase SQL editor —
-          <code className="mx-1">select public.family_admin_clear_pin(&#39;{me.id}&#39;);</code>
-          — so that nobody can reset someone else&rsquo;s from this screen.
-        </p>
-      ) : null}
     </Block>
   );
 }
@@ -407,8 +628,42 @@ export function SettingsTab() {
               label={(o) => WIDTH_LABELS[o]}
             />
           </div>
+          <div>
+            <p className="text-faint mb-1.5 text-xs">Text size</p>
+            <Choice<TextSize>
+              options={TEXT_SIZES}
+              value={prefs.textSize}
+              onChange={(textSize) => setPrefs({ textSize })}
+              label={(o) => TEXT_SIZE_LABELS[o]}
+            />
+          </div>
+          <div>
+            <p className="text-faint mb-1.5 text-xs">Calendar opens as</p>
+            <Choice<CalendarView>
+              options={CALENDAR_VIEWS}
+              value={prefs.calendarView}
+              onChange={(calendarView) => setPrefs({ calendarView })}
+              label={(o) => CALENDAR_VIEW_LABELS[o]}
+            />
+          </div>
         </div>
       </Block>
+
+      <Block title="On the calendar page" hint="Hide what this screen does not need.">
+        <Toggle
+          label="Quote of the day"
+          checked={prefs.showQuote}
+          onChange={(showQuote) => setPrefs({ showQuote })}
+        />
+        <Toggle
+          label="Family photos"
+          checked={prefs.showPhotos}
+          onChange={(showPhotos) => setPrefs({ showPhotos })}
+        />
+      </Block>
+
+      <WeatherBlock />
+      <NotificationsBlock />
 
       <ProfileBlock />
       <PinBlock />

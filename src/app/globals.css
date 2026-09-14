@@ -12,7 +12,7 @@
  *
  * Two attributes drive the whole system, both stamped on <html>:
  *
- *   data-theme  the named palette — light | midnight | emerald | navy.
+ *   data-theme  the named palette — one of the ids in `src/lib/themes.ts`.
  *               Absent means "nothing has decided yet", which only happens
  *               with JavaScript off; the media query at the bottom of this
  *               block covers that case.
@@ -125,6 +125,104 @@
   --color-success: #7fd0a8;
   --color-danger: #fb7185;
   --color-danger-soft: #2a1620;
+}
+
+/* --------------------------------------------------------------- Warm Sand
+ * The paper-and-clay palette the dashboard started from, kept as a choice
+ * rather than a default: warm greys read softer under kitchen light, and the
+ * terracotta accent belongs to them in a way the gold does not.
+ */
+:root[data-theme="sand"] {
+  --color-canvas: #faf6f0;
+  --color-surface: #fffdfa;
+  --color-surface-raised: #ffffff;
+  --color-sunk: #f2ece3;
+  --color-ink: #241d16;
+  --color-on-ink: #fffdfa;
+  --color-muted: #6b5e51;
+  --color-faint: #9c8e7f;
+  --color-line: #e6ddd0;
+  --color-accent: #b4633a;
+  --color-accent-soft: #f7ece5;
+  --color-success: #4a7c52;
+  --color-danger: #b3352c;
+  --color-danger-soft: #fbeeec;
+}
+
+/* ----------------------------------------------------------------- Blossom */
+:root[data-theme="blossom"] {
+  --color-canvas: #fdf5f7;
+  --color-surface: #ffffff;
+  --color-surface-raised: #ffffff;
+  --color-sunk: #f7e9ee;
+  --color-ink: #2a1a24;
+  --color-on-ink: #ffffff;
+  --color-muted: #6d5561;
+  --color-faint: #a3899a;
+  --color-line: #efdae2;
+  --color-accent: #c2456f;
+  --color-accent-soft: #fbe7ee;
+  --color-success: #2f7a55;
+  --color-danger: #b3252f;
+  --color-danger-soft: #fdecee;
+}
+
+/* ----------------------------------------------------------- High Contrast
+ * Not a style so much as an accessibility setting: black on white, a blue that
+ * clears WCAG AAA against both, and hairlines dark enough to actually be seen
+ * across a kitchen by someone who finds the grey ones invisible.
+ */
+:root[data-theme="contrast"] {
+  --color-canvas: #ffffff;
+  --color-surface: #ffffff;
+  --color-surface-raised: #ffffff;
+  --color-sunk: #ededed;
+  --color-ink: #000000;
+  --color-on-ink: #ffffff;
+  --color-muted: #333333;
+  --color-faint: #4a4a4a;
+  --color-line: #8a8a8a;
+  --color-accent: #0035c8;
+  --color-accent-soft: #e2e8fb;
+  --color-success: #0a5c2e;
+  --color-danger: #a30009;
+  --color-danger-soft: #fbe6e7;
+}
+
+/* ---------------------------------------------------------------- Graphite */
+:root[data-theme="slate"] {
+  --color-canvas: #111418;
+  --color-surface: #191d23;
+  --color-surface-raised: #20252c;
+  --color-sunk: #232830;
+  --color-ink: #eef1f5;
+  --color-on-ink: #111418;
+  --color-muted: #a6b0bd;
+  --color-faint: #76818f;
+  --color-line: #2c323b;
+  --color-accent: #9fb3c8;
+  --color-accent-soft: #232c36;
+  --color-success: #7fc79c;
+  --color-danger: #f87171;
+  --color-danger-soft: #2a1717;
+}
+
+/* ------------------------------------------------------------ Plum Velvet */
+:root[data-theme="plum"] {
+  --color-canvas: #140c18;
+  --color-surface: #1d1322;
+  --color-surface-raised: #251929;
+  --color-sunk: #281c2e;
+  --color-ink: #f4ecf5;
+  --color-on-ink: #140c18;
+  --color-muted: #b6a3bc;
+  --color-faint: #86738d;
+  --color-line: #33243a;
+  --color-accent: #d98cc4;
+  --color-accent-soft: #2e1c31;
+  --color-success: #86cfa6;
+  --color-danger: #fb7185;
+  --color-danger-soft: #331a24;
 }
 
 html {

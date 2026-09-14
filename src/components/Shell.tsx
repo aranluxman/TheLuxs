@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useMessageNotifications } from "@/hooks/useMessageNotifications";
 import { usePrefs } from "@/hooks/usePrefs";
 import { useTabActivity, type ActivityTab } from "@/hooks/useTabActivity";
-import { WIDTH_CLASS } from "@/lib/prefs";
+import { TEXT_SIZE_ROOT_PX, WIDTH_CLASS } from "@/lib/prefs";
 import { useFamily } from "./FamilyProvider";
 import { CalendarTab } from "./CalendarTab";
 import { ChatTab } from "./ChatTab";
@@ -30,7 +31,15 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]["id"];
 
-/** Settings and Chat are excluded: neither has "new since you looked" activity. */
+/**
+ * Settings is excluded: it has no "new since you looked" activity.
+ *
+ * Chat is excluded from *this* mechanism too, but for the opposite reason — it
+ * has so much that it gets its own. `useTabActivity` marks a tab seen by
+ * opening it, which is right for a board and wrong for a conversation that has
+ * already been read; `useMessageNotifications` tracks the chat instead, and
+ * also does the notifying.
+ */
 const ACTIVITY_TABS = new Set<string>(["calendar", "todos", "chores", "shopping"]);
 
 function isActivityTab(id: TabId): id is ActivityTab {
@@ -47,7 +56,7 @@ function NavDot() {
 }
 
 export function Shell() {
-  const { currentMember, setCurrentMemberId } = useFamily();
+  const { currentMember, members, setCurrentMemberId } = useFamily();
   const { iconUrl } = useAppIcon();
   const { prefs } = usePrefs();
   // Which tab opens is a per-device setting; the calendar is the default.
@@ -61,6 +70,33 @@ export function Shell() {
   const width = WIDTH_CLASS[prefs.width];
 
   const { unseen, markSeen } = useTabActivity();
+
+  const { unread: chatUnread, setNames } = useMessageNotifications(
+    currentMember?.id ?? null,
+    tab === "chat",
+  );
+
+  // The notification body says who sent it, and the alert hook has no reason
+  // to hold the member list itself.
+  const memberNames = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const m of members) out[m.id] = m.name;
+    return out;
+  }, [members]);
+  useEffect(() => setNames(memberNames), [memberNames, setNames]);
+
+  /**
+   * Text size is a root font-size, because every measurement in the app is in
+   * `rem` through Tailwind — so one number here scales the whole interface,
+   * including the things nobody would remember to add a class to.
+   */
+  useEffect(() => {
+    const px = TEXT_SIZE_ROOT_PX[prefs.textSize];
+    document.documentElement.style.fontSize = `${px}px`;
+    return () => {
+      document.documentElement.style.fontSize = "";
+    };
+  }, [prefs.textSize]);
 
   // Opening a tab is what marks it seen — including the one the app opens on,
   // which is why this runs on mount as well as on every switch.
@@ -121,6 +157,7 @@ export function Shell() {
                     screen is seen by definition, and a dot there would blink on
                     and off as rows arrive under you. */}
                 {tab !== t.id && isActivityTab(t.id) && unseen[t.id] ? <NavDot /> : null}
+                {tab !== "chat" && t.id === "chat" && chatUnread ? <NavDot /> : null}
               </button>
             ))}
           </nav>
@@ -182,6 +219,7 @@ export function Shell() {
             <span className="relative text-lg" aria-hidden>
               {t.icon}
               {tab !== t.id && isActivityTab(t.id) && unseen[t.id] ? <NavDot /> : null}
+              {tab !== "chat" && t.id === "chat" && chatUnread ? <NavDot /> : null}
             </span>
             {t.label}
           </button>

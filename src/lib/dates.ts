@@ -1,10 +1,13 @@
 import {
   addDays,
+  addMonths,
+  addWeeks,
   eachDayOfInterval,
   endOfMonth,
   endOfWeek,
   format,
   isSameDay,
+  isSameMonth,
   parseISO,
   startOfMonth,
   startOfWeek,
@@ -67,6 +70,11 @@ export function monthGridDays(anchor: Date): Date[] {
   });
 }
 
+/** The Monday-first week containing `d`, as seven local dates. */
+export function weekDaysOf(d: Date): Date[] {
+  return weekDays(d);
+}
+
 export function formatTime(d: Date): string {
   return format(d, "h:mm a");
 }
@@ -104,4 +112,13 @@ export function toLocalInputValue(d: Date): string {
   return format(d, "yyyy-MM-dd'T'HH:mm");
 }
 
-export { addDays, format, isSameDay, parseISO };
+export {
+  addDays,
+  addMonths,
+  addWeeks,
+  format,
+  isSameDay,
+  isSameMonth,
+  parseISO,
+  startOfMonth,
+};

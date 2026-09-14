@@ -17,7 +17,17 @@
 
 export type ThemeMode = "light" | "dark";
 
-export const THEME_IDS = ["light", "midnight", "emerald", "navy"] as const;
+export const THEME_IDS = [
+  "light",
+  "sand",
+  "blossom",
+  "contrast",
+  "midnight",
+  "slate",
+  "emerald",
+  "navy",
+  "plum",
+] as const;
 export type ThemeId = (typeof THEME_IDS)[number];
 
 /** What the user picked. "system" follows the OS and is the default. */
@@ -44,12 +54,44 @@ export const THEMES: readonly ThemeDefinition[] = [
     chrome: "#f7f7f8",
   },
   {
+    id: "sand",
+    label: "Warm Sand",
+    blurb: "Paper and clay, with a terracotta accent.",
+    mode: "light",
+    swatch: ["#faf6f0", "#241d16", "#b4633a"],
+    chrome: "#faf6f0",
+  },
+  {
+    id: "blossom",
+    label: "Blossom",
+    blurb: "Pale pink, deep plum type.",
+    mode: "light",
+    swatch: ["#fdf5f7", "#2a1a24", "#c2456f"],
+    chrome: "#fdf5f7",
+  },
+  {
+    id: "contrast",
+    label: "High Contrast",
+    blurb: "Pure white, black type, thick lines.",
+    mode: "light",
+    swatch: ["#ffffff", "#000000", "#0035c8"],
+    chrome: "#ffffff",
+  },
+  {
     id: "midnight",
     label: "Midnight Dark",
     blurb: "Deep charcoal, gold accents.",
     mode: "dark",
     swatch: ["#0e0e10", "#f4f2ee", "#d9a441"],
     chrome: "#0e0e10",
+  },
+  {
+    id: "slate",
+    label: "Graphite",
+    blurb: "Cool slate, no colour cast at all.",
+    mode: "dark",
+    swatch: ["#111418", "#eef1f5", "#9fb3c8"],
+    chrome: "#111418",
   },
   {
     id: "emerald",
@@ -66,6 +108,14 @@ export const THEMES: readonly ThemeDefinition[] = [
     mode: "dark",
     swatch: ["#080d18", "#e9eefb", "#7ba7f5"],
     chrome: "#080d18",
+  },
+  {
+    id: "plum",
+    label: "Plum Velvet",
+    blurb: "Deep aubergine, warm rose highlight.",
+    mode: "dark",
+    swatch: ["#140c18", "#f4ecf5", "#d98cc4"],
+    chrome: "#140c18",
   },
 ];
 

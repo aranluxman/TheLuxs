@@ -14,9 +14,10 @@ import type { Todo } from "@/lib/types";
  */
 export async function createTodo(
   title: string,
-  assignedTo: string | null,
+  assigneeIds: string[],
   dueOn: string | null,
   createdBy: string | null,
+  estimateMinutes: number | null = null,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const trimmed = title.trim();
   if (!trimmed) return { ok: false, error: "A task needs a name." };
@@ -24,8 +25,9 @@ export async function createTodo(
 
   const { error } = await getSupabase().from("family_todos").insert({
     title: trimmed.slice(0, 140),
-    assigned_to: assignedTo,
+    assignee_ids: assigneeIds,
     due_on: dueOn || null,
+    estimate_minutes: estimateMinutes,
     created_by: createdBy,
   });
 
@@ -113,13 +115,14 @@ export function useTodos(ready = true) {
     };
   }, [ready]);
 
-  /** @param assignedTo a member id, or null for the whole house. */
+  /** @param assigneeIds who it is for. Empty is the whole house. */
   const addTodo = useCallback(
     async (
       title: string,
-      assignedTo: string | null,
+      assigneeIds: string[],
       dueOn: string | null,
       createdBy: string | null,
+      estimateMinutes: number | null = null,
     ) => {
       const trimmed = title.trim();
       if (!trimmed) return false;
@@ -128,8 +131,9 @@ export function useTodos(ready = true) {
         .from("family_todos")
         .insert({
           title: trimmed.slice(0, 140),
-          assigned_to: assignedTo,
+          assignee_ids: assigneeIds,
           due_on: dueOn || null,
+          estimate_minutes: estimateMinutes,
           created_by: createdBy,
         })
         .select()
@@ -178,6 +182,54 @@ export function useTodos(ready = true) {
     [todos],
   );
 
+  /**
+   * Edit a task in place.
+   *
+   * Only the four fields a person can see and change on the card; `created_by`
+   * and `created_at` are deliberately absent, and migration 0015's column
+   * grants are what actually enforce that. Not optimistic: an edit is a
+   * considered action behind a form with a Save button, so there is nothing to
+   * hide a round trip behind, and showing an un-saved title as saved is worse
+   * than a moment's wait.
+   */
+  const editTodo = useCallback(
+    async (
+      id: string,
+      patch: {
+        title?: string;
+        assignee_ids?: string[];
+        due_on?: string | null;
+        estimate_minutes?: number | null;
+      },
+    ) => {
+      const clean: Record<string, unknown> = { ...patch };
+      if (typeof patch.title === "string") {
+        const trimmed = patch.title.trim();
+        if (!trimmed) {
+          setError("A task needs a name.");
+          return false;
+        }
+        clean.title = trimmed.slice(0, 140);
+      }
+
+      const { data, error: err } = await getSupabase()
+        .from("family_todos")
+        .update(clean)
+        .eq("id", id)
+        .select()
+        .maybeSingle();
+
+      if (err || !data) {
+        setError(err?.message ?? "That did not save.");
+        return false;
+      }
+      setTodos((prev) => prev.map((t) => (t.id === id ? (data as Todo) : t)));
+      setError(null);
+      return true;
+    },
+    [],
+  );
+
   const removeTodo = useCallback(async (id: string) => {
     const { error: err } = await getSupabase().from("family_todos").delete().eq("id", id);
     if (err) {
@@ -203,5 +255,15 @@ export function useTodos(ready = true) {
     setTodos((prev) => prev.filter((t) => !t.done_at));
   }, [todos]);
 
-  return { todos, loading, error, addTodo, setDone, removeTodo, clearDone, reload: load };
+  return {
+    todos,
+    loading,
+    error,
+    addTodo,
+    editTodo,
+    setDone,
+    removeTodo,
+    clearDone,
+    reload: load,
+  };
 }
