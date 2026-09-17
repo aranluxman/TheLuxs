@@ -43,12 +43,19 @@ export function Marquee({
     </span>
   );
 
-  // Too little to be worth moving: render it plainly, centred, and let it be.
+  /*
+   * Nothing worth moving, or nobody who wants movement.
+   *
+   * The static list wraps rather than running off the edge — under
+   * `prefers-reduced-motion` this is the *only* way these events are shown, so
+   * a line clipped by the mask would be information that reader never gets.
+   * Capped at three: past that the strip stops being a strip.
+   */
   if (items.length === 1 || reduced) {
     return (
-      <div ref={ref} className={`marquee ${className}`} aria-label={label}>
+      <div ref={ref} className={`marquee marquee-plain ${className}`} aria-label={label}>
         <div className="marquee-static">
-          {items.map((item, i) => (
+          {items.slice(0, 3).map((item, i) => (
             <span key={i} className="inline-flex items-center">
               {i > 0 ? separator : null}
               {item}

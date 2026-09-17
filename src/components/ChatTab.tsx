@@ -559,7 +559,10 @@ export function ChatTab() {
       return;
     }
     if (grew > 0) setNewBelow((n) => n + grew);
-  }, [rows.length, reactions.count]);
+    // `sending.length` belongs here too: a pending bubble adds height exactly
+    // like a real one, and without it your own message goes out of sight the
+    // moment you press Enter.
+  }, [rows.length, reactions.count, sending.length]);
 
   /** The pill's job: put the reader back at the bottom and clear itself. */
   function jumpToLatest() {

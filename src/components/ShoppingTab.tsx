@@ -149,11 +149,15 @@ export function ShoppingTab() {
    * never on arriving at a list that was already empty.
    */
   const cleared = toBuy.length === 0 && done.length > 0;
-  const [wasCleared, setWasCleared] = useState(false);
+  const [seenCleared, setSeenCleared] = useState<boolean | null>(null);
   const [burst, setBurst] = useState(0);
-  if (cleared !== wasCleared) {
-    setWasCleared(cleared);
-    if (cleared) setBurst((n) => n + 1);
+  if (!loading && seenCleared !== cleared) {
+    // The first state seen after the data lands is the baseline, never a
+    // celebration: opening a screen that was already finished is not an
+    // achievement, and the burst would then fire on every visit.
+    const firstLook = seenCleared === null;
+    setSeenCleared(cleared);
+    if (cleared && !firstLook) setBurst((n) => n + 1);
   }
 
   async function submit(e: React.FormEvent) {

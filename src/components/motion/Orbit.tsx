@@ -58,14 +58,28 @@ export function Orbit({
                 borderColor: m.color,
               }}
             >
-              {m.avatar_url ? (
-                /* eslint-disable-next-line @next/next/no-img-element */
-                <img src={m.avatar_url} alt="" className="h-full w-full rounded-full object-cover" />
-              ) : (
-                <span className="orbit-initial" style={{ color: m.color }}>
-                  {m.name.slice(0, 1).toUpperCase()}
-                </span>
-              )}
+              {/*
+               * Two counter-rotations, not one, and they undo different things.
+               * The ring's own turn is cancelled by the reverse animation on
+               * `.orbit-avatar`; the slot's fixed angle — the thing that parks
+               * this face at four o'clock rather than twelve — is cancelled
+               * here. Without this second one every face sits permanently
+               * tipped by its position on the rim.
+               */}
+              <span className="orbit-face">
+                {m.avatar_url ? (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img
+                    src={m.avatar_url}
+                    alt=""
+                    className="h-full w-full rounded-full object-cover"
+                  />
+                ) : (
+                  <span className="orbit-initial" style={{ color: m.color }}>
+                    {m.name.slice(0, 1).toUpperCase()}
+                  </span>
+                )}
+              </span>
             </span>
           </span>
         ))}
