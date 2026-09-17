@@ -320,6 +320,42 @@ body,
     color 260ms ease;
 }
 
+/*
+ * ...and for the ~400ms a swap is actually happening, every other surface
+ * joins in. `ThemeProvider` stamps `data-theming` on the root for the length
+ * of the change and takes it off again, which is what keeps this from putting
+ * a third of a second of lag behind every hover in the app.
+ *
+ * `!important` because many of these elements carry their own, narrower
+ * `transition` from a utility class, and the whole point is to override those
+ * for the duration.
+ */
+:root[data-theming] *,
+:root[data-theming] *::before,
+:root[data-theming] *::after {
+  transition:
+    background-color 300ms ease,
+    border-color 300ms ease,
+    color 300ms ease,
+    fill 300ms ease,
+    stroke 300ms ease !important;
+}
+
+/*
+ * The text-size setting is a root font-size, and everything in the app is
+ * sized in rem — so this one line is what makes Small → Large a smooth
+ * re-scale of the whole interface rather than a jump. The content-width
+ * setting is the same idea one level down.
+ */
+html {
+  transition: font-size 240ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dashboard-main,
+.app-header > div {
+  transition: max-width 320ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
 button,
 a,
 input,
@@ -332,8 +368,15 @@ button {
   touch-action: manipulation;
 }
 
+/*
+ * Every button squashes a little when pressed. `.press` (see the motion kit
+ * below) tightens this to 0.97 and adds the hover lift on pointer devices; this
+ * is the floor for the buttons that are not built from that component — the
+ * icon buttons, the chips and the tab bar.
+ */
 button:active:not(:disabled) {
   transform: scale(0.98);
+  transition: transform 120ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 button:focus-visible,
@@ -809,7 +852,797 @@ select:focus-visible {
   to { transform: translateX(100%); }
 }
 
+/* ============================================================== motion kit
+ *
+ * Everything below is the app's motion vocabulary: a small set of classes the
+ * components reach for, plus the keyframes they run. Three rules hold
+ * throughout, and they are what keep this from becoming a liability on a phone:
+ *
+ *   1. Only `transform`, `opacity` and (twice) `filter` are animated. Anything
+ *      that moves layout — width, height, top — is off the table, which is why
+ *      the collapsing rows below use `grid-template-rows` on a wrapper rather
+ *      than animating a height.
+ *   2. Every colour comes from a `--color-*` token, so a burst of confetti or a
+ *      glow behind a face is in the household's palette in all nine themes.
+ *   3. Anything infinite can be stopped. `[data-paused="true"]` freezes it, and
+ *      the components set that when the element scrolls out of view or the tab
+ *      is hidden.
+ *
+ * The reduced-motion block at the end of the file is the other half of this:
+ * it is written as "show the end state immediately", never "hide the thing".
+ */
+
+/* ------------------------------------------------------------------ reveal */
+
+.reveal {
+  animation: reveal-in 560ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Below the fold and not yet reached. Held invisible rather than un-animated,
+   so the entrance still has somewhere to come from when it is scrolled to. */
+.reveal-idle {
+  opacity: 0;
+}
+
+@keyframes reveal-in {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* --------------------------------------------------------------- count-ups */
+
+.count-up {
+  display: inline-block;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A number that changed after the first paint. Short and slightly overshooting
+   — the same shape as the tick box's pop, because it means the same thing. */
+.count-up[data-bump="true"] {
+  animation: count-pop 320ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes count-pop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+
+/* ------------------------------------------------------------- the live dot */
+
+/*
+ * A dot with a ring leaving it, beside anything that is genuinely new. The
+ * ring is a `::before` so the dot itself never moves: a pulsing element next
+ * to text drags the baseline around, and this sits inside a line of copy.
+ */
+.live-dot {
+  position: relative;
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--color-accent);
+}
+
+.live-dot::before {
+  position: absolute;
+  border-radius: 999px;
+  border: 2px solid var(--color-accent);
+  content: "";
+  inset: -2px;
+  animation: live-pulse 2.2s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+}
+
+@keyframes live-pulse {
+  0% { opacity: 0.6; transform: scale(0.9); }
+  70% { opacity: 0; transform: scale(1.9); }
+  100% { opacity: 0; transform: scale(1.9); }
+}
+
+/* --------------------------------------------------------------- greeting */
+
+/* The time-of-day line swaps at noon and at six; a straight text change reads
+   as a glitch, so the new words fade up in place. */
+.greeting-swap {
+  animation: greeting-in 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes greeting-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---------------------------------------------------------------- marquee */
+
+.marquee {
+  position: relative;
+  overflow: hidden;
+  /* The strip has no edges of its own, so the text has to fade into the card
+     rather than stop at a hard line mid-word. */
+  mask-image: linear-gradient(90deg, transparent, #000 4rem, #000 calc(100% - 4rem), transparent);
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 4rem, #000 calc(100% - 4rem), transparent);
+}
+
+.marquee-track {
+  display: flex;
+  width: max-content;
+  animation: marquee-slide linear infinite;
+}
+
+.marquee-run {
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.marquee-static {
+  display: flex;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+/* Hover to read one; hold to read the rest. Both are the same gesture. */
+.marquee:hover .marquee-track,
+.marquee:active .marquee-track,
+.marquee[data-paused="true"] .marquee-track {
+  animation-play-state: paused;
+}
+
+/*
+ * -50%, not -100%: the track holds the list twice, so at half its width the
+ * second copy sits exactly where the first began and the loop has no seam.
+ */
+@keyframes marquee-slide {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+/* ------------------------------------------------------------------ orbit */
+
+.orbit {
+  position: relative;
+  width: 8.5rem;
+  height: 8.5rem;
+  margin-inline: auto;
+}
+
+@media (min-width: 640px) {
+  .orbit {
+    width: 10.5rem;
+    height: 10.5rem;
+  }
+}
+
+.orbit-ring,
+.orbit-dashes,
+.orbit-riders {
+  position: absolute;
+  border-radius: 999px;
+  inset: 0;
+}
+
+.orbit-ring {
+  border: 1px solid color-mix(in srgb, var(--color-accent) 22%, transparent);
+}
+
+/* The second ring turns the other way and much slower. One rotation on its own
+   reads as a spinner waiting for something; two at different speeds read as a
+   system that is simply running. */
+.orbit-dashes {
+  border: 1px dashed color-mix(in srgb, var(--color-accent) 30%, transparent);
+  inset: 0.9rem;
+  animation: orbit-spin 70s linear infinite reverse;
+}
+
+.orbit-riders {
+  animation: orbit-spin 40s linear infinite;
+}
+
+.orbit[data-paused="true"] .orbit-riders,
+.orbit[data-paused="true"] .orbit-dashes,
+.orbit[data-paused="true"] .orbit-avatar {
+  animation-play-state: paused;
+}
+
+.orbit-home {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  width: 3rem;
+  height: 3rem;
+  translate: -50% -50%;
+  place-items: center;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-accent) 14%, var(--color-surface));
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--color-ink) 12%, transparent);
+}
+
+.orbit-home-glyph {
+  display: grid;
+  place-items: center;
+  font-size: 1.25rem;
+  animation: orbit-breathe 6s ease-in-out infinite;
+}
+
+/*
+ * Each face is parked on the rim by rotating its slot to an angle and pushing
+ * it out along that angle. The avatar then counter-rotates at exactly the
+ * ring's speed, which is what keeps a head upright all the way round.
+ */
+.orbit-slot {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2rem;
+  height: 2rem;
+  margin: -1rem 0 0 -1rem;
+  transform: rotate(var(--orbit-angle)) translate(0, -3.9rem);
+}
+
+@media (min-width: 640px) {
+  .orbit-slot {
+    transform: rotate(var(--orbit-angle)) translate(0, -4.9rem);
+  }
+}
+
+.orbit-avatar {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  overflow: hidden;
+  border: 2px solid;
+  border-radius: 999px;
+  animation: orbit-spin 40s linear infinite reverse;
+}
+
+.orbit-initial {
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+@keyframes orbit-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes orbit-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+}
+
+/* --------------------------------------------------------- profile picker */
+
+.profile-card {
+  transition:
+    transform 260ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 260ms ease,
+    border-color 260ms ease;
+}
+
+/*
+ * The glow is that person's own colour, passed in as `--profile-hue`. It is a
+ * shadow rather than a background so it never fights the card's own fill in the
+ * dark themes, where a tinted panel goes muddy.
+ */
+@media (hover: hover) {
+  .profile-card:hover {
+    transform: translateY(-4px);
+    border-color: color-mix(in srgb, var(--profile-hue, var(--color-accent)) 45%, var(--color-line));
+    box-shadow:
+      0 18px 34px color-mix(in srgb, var(--color-ink) 10%, transparent),
+      0 0 0 1px color-mix(in srgb, var(--profile-hue, var(--color-accent)) 22%, transparent),
+      0 10px 30px color-mix(in srgb, var(--profile-hue, var(--color-accent)) 26%, transparent);
+  }
+}
+
+.profile-card:focus-visible {
+  transform: translateY(-4px);
+}
+
+.profile-card:hover .profile-lock,
+.profile-card:focus-visible .profile-lock {
+  animation: lock-wiggle 620ms ease-in-out;
+}
+
+@keyframes lock-wiggle {
+  0%, 100% { transform: rotate(0deg); }
+  20% { transform: rotate(-8deg); }
+  45% { transform: rotate(8deg); }
+  70% { transform: rotate(-5deg); }
+}
+
+/* ------------------------------------------------------------------- PIN */
+
+/*
+ * Four dots above the field, filling in as digits are typed. They are a
+ * *mirror* of the input's length and nothing more — the value never leaves the
+ * input, and these carry no part of it.
+ */
+.pin-dots {
+  display: flex;
+  gap: 0.625rem;
+}
+
+.pin-dot {
+  width: 0.625rem;
+  height: 0.625rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-ink) 18%, transparent);
+  transition: background-color 180ms ease;
+}
+
+.pin-dot[data-filled="true"] {
+  background: var(--color-accent);
+  animation: pin-pop 260ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes pin-pop {
+  from { transform: scale(0.6); }
+  to { transform: scale(1); }
+}
+
+/* A wrong PIN shakes the row it was typed into, which says "not that" without
+   a word of copy and without moving anything around it. */
+.pin-shake {
+  animation: shake-x 400ms cubic-bezier(0.36, 0.07, 0.19, 0.97);
+}
+
+.pin-clearing .pin-dot {
+  animation: pin-clear 260ms ease both;
+}
+
+@keyframes pin-clear {
+  to { opacity: 0; transform: scale(0.7); }
+}
+
+/* The lock on the dialog turning over as it opens. */
+.pin-unlocked {
+  animation: lock-open 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes lock-open {
+  0% { transform: rotate(0deg) scale(1); }
+  45% { transform: rotate(-18deg) scale(1.1); }
+  100% { transform: rotate(0deg) scale(1); }
+}
+
+@keyframes shake-x {
+  0%, 100% { transform: translateX(0); }
+  15% { transform: translateX(-8px); }
+  35% { transform: translateX(8px); }
+  55% { transform: translateX(-5px); }
+  75% { transform: translateX(3px); }
+}
+
+/* ------------------------------------------------------- moving between views */
+
+/*
+ * Paging a calendar in the direction of travel. The class is swapped on every
+ * change and keyed in React, so the animation restarts rather than being
+ * skipped as "already applied".
+ */
+.slide-from-right {
+  animation: slide-from-right 300ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.slide-from-left {
+  animation: slide-from-left 300ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes slide-from-right {
+  from { opacity: 0; transform: translateX(24px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes slide-from-left {
+  from { opacity: 0; transform: translateX(-24px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Today, on the grid: a ring that breathes out of the date rather than a
+   heavier fill, so the number stays as legible as every other number. */
+.today-ring::after {
+  position: absolute;
+  border-radius: 999px;
+  border: 2px solid var(--color-accent);
+  content: "";
+  inset: -3px;
+  animation: live-pulse 2.6s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+  pointer-events: none;
+}
+
+.grid-chip {
+  transition: transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (hover: hover) {
+  .grid-chip:hover {
+    transform: translateX(2px) scale(1.02);
+  }
+}
+
+/* --------------------------------------------------------------- modals */
+
+/* A sheet on a phone, a dialog on a desktop — the same scale-and-fade either
+   way, so opening an event feels like the same action on both. */
+.modal-backdrop {
+  animation: fade-in 200ms ease both;
+}
+
+.modal-panel {
+  animation: modal-in 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* The way out. Shorter than the way in — leaving should feel like a dismissal
+   rather than a second performance. */
+.modal-backdrop-out {
+  animation: fade-out 200ms ease both;
+}
+
+.modal-out {
+  animation: modal-out 200ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+
+@keyframes fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes modal-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: scale(0.97) translateY(6px); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modal-in {
+  from { opacity: 0; transform: scale(0.96) translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ----------------------------------------------------------------- chat */
+
+/* Three dots, while a message is on its way to the server. Staggered by a
+   tenth so it reads as a wave rather than a blink. */
+.sending-dots {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+}
+
+.sending-dots > span {
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: currentColor;
+  animation: sending-bounce 1.1s ease-in-out infinite;
+}
+
+.sending-dots > span:nth-child(2) { animation-delay: 120ms; }
+.sending-dots > span:nth-child(3) { animation-delay: 240ms; }
+
+@keyframes sending-bounce {
+  0%, 60%, 100% { opacity: 0.45; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-3px); }
+}
+
+/* "New messages ↓" — arrives from below the fold it is telling you about. */
+.new-messages-pill {
+  animation:
+    pill-up 320ms cubic-bezier(0.16, 1, 0.3, 1) both,
+    pill-nudge 520ms 360ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes pill-up {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes pill-nudge {
+  0%, 100% { transform: scale(1); }
+  45% { transform: scale(1.06); }
+}
+
+/* An unread count that has just changed. */
+.badge-pop {
+  animation: badge-pop 340ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes badge-pop {
+  0% { transform: scale(0.6); }
+  55% { transform: scale(1.1); }
+  100% { transform: scale(1); }
+}
+
+/* ------------------------------------------------------------- collapsing */
+
+/*
+ * A row that finishes, or a form that opens, without the page jumping.
+ *
+ * `grid-template-rows: 1fr → 0fr` is the one way to animate "to the height of
+ * my content" without measuring it in JavaScript. The child must be
+ * `min-height: 0` and `overflow: hidden` or it refuses to be squeezed — that is
+ * the whole trick, and it is why this is two rules rather than one.
+ */
+.collapsible {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition:
+    grid-template-rows 320ms cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 240ms ease;
+}
+
+.collapsible[data-open="false"] {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+
+.collapsible > * {
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Something that has just arrived in a list, marked briefly so the eye can
+   find where it landed. */
+.just-added {
+  animation: just-added 1400ms ease-out both;
+}
+
+@keyframes just-added {
+  0% { background-color: color-mix(in srgb, var(--color-accent) 20%, transparent); }
+  100% { background-color: transparent; }
+}
+
+/* ------------------------------------------------------- shopping strike */
+
+/*
+ * The line is drawn across the label rather than switched on. `line-through`
+ * appears all at once; this is a 2px rule growing from the left, which is what
+ * a pencil through a list does.
+ */
+.strike {
+  position: relative;
+}
+
+.strike::after {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 100%;
+  height: 1.5px;
+  border-radius: 999px;
+  background: currentColor;
+  content: "";
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 300ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.tick-row[data-done="true"] .strike::after {
+  transform: scaleX(1);
+}
+
+/* ---------------------------------------------------------- leaderboard */
+
+.meter-fill {
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 720ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.meter-fill[data-grown="true"] {
+  transform: scaleX(var(--meter, 0));
+}
+
+/* The crown lands once, on whoever is ahead. */
+.crown-in {
+  display: inline-block;
+  animation: crown-in 620ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes crown-in {
+  0% { opacity: 0; transform: translateY(-8px) scale(0.6) rotate(-12deg); }
+  60% { opacity: 1; transform: translateY(2px) scale(1.12) rotate(4deg); }
+  100% { opacity: 1; transform: none; }
+}
+
+/* ------------------------------------------------------------- confetti */
+
+/*
+ * Deliberately not clipped: the burst is anchored to whatever just completed —
+ * a 2px progress bar, a cleared-list card — and the paper has to be able to
+ * fall past it. Nothing can scroll the page sideways (see the `overflow-x:
+ * clip` on html and body above), so a piece that drifts wide is simply not
+ * drawn rather than dragging the layout with it.
+ */
+.confetti {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.confetti-piece {
+  position: absolute;
+  top: 0;
+  width: 7px;
+  height: 11px;
+  border-radius: 1px;
+  opacity: 0;
+  animation: confetti-fall 1.2s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+}
+
+@keyframes confetti-fall {
+  0% { opacity: 0; transform: translate3d(0, -10px, 0) rotate(0deg) scale(0.6); }
+  12% { opacity: 1; }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--confetti-x), var(--confetti-y), 0)
+      rotate(var(--confetti-rotate)) scale(1);
+  }
+}
+
+/* --------------------------------------------------------------- photos */
+
+/*
+ * Ken Burns on the photo currently showing. The scale and the drift are small
+ * on purpose — this is a family photo on a kitchen wall, not a documentary
+ * title sequence — and the direction alternates per slide so consecutive
+ * photos do not all pan the same way.
+ */
+.ken-burns {
+  animation: ken-burns 12s ease-in-out both;
+  transform-origin: center;
+}
+
+.ken-burns[data-direction="reverse"] {
+  animation-name: ken-burns-alt;
+}
+
+.photo-carousel[data-paused="true"] .ken-burns {
+  animation-play-state: paused;
+}
+
+@keyframes ken-burns {
+  from { transform: scale(1) translate3d(0, 0, 0); }
+  to { transform: scale(1.08) translate3d(-1.2%, -1%, 0); }
+}
+
+@keyframes ken-burns-alt {
+  from { transform: scale(1.08) translate3d(1.2%, 1%, 0); }
+  to { transform: scale(1) translate3d(0, 0, 0); }
+}
+
+/* The empty state's icon, drifting like something waiting to be filled. */
+.float-idle {
+  animation: float-idle 5s ease-in-out infinite;
+}
+
+@keyframes float-idle {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+/* --------------------------------------------------------- nav indicator */
+
+/*
+ * One pill that slides between tabs, rather than a background that appears
+ * under whichever tab is current. Its position and width are measured from the
+ * live buttons and written into custom properties, so it keeps up with a label
+ * that wraps or a font that scales.
+ */
+.nav-indicator {
+  position: absolute;
+  z-index: 0;
+  border-radius: 0.75rem;
+  background: var(--color-ink);
+  transform: translateX(var(--nav-x, 0));
+  width: var(--nav-w, 0);
+  transition:
+    transform 350ms cubic-bezier(0.16, 1, 0.3, 1),
+    width 350ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* The bottom bar's marker is a short rule above the icon rather than a filled
+   pill — the same idea at the other end of the screen. */
+.nav-bar-indicator {
+  position: absolute;
+  top: 0;
+  z-index: 1;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--color-accent);
+  transform: translateX(var(--nav-x, 0));
+  width: var(--nav-w, 0);
+  transition:
+    transform 350ms cubic-bezier(0.16, 1, 0.3, 1),
+    width 350ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ------------------------------------------------------------------ sync */
+
+.spin {
+  display: inline-block;
+  animation: spin 900ms linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.pop-in {
+  animation: pop-in 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes pop-in {
+  0% { opacity: 0; transform: scale(0.6); }
+  60% { opacity: 1; transform: scale(1.12); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+.shake {
+  animation: shake-x 400ms cubic-bezier(0.36, 0.07, 0.19, 0.97);
+}
+
+/* -------------------------------------------------------- install prompt */
+
+.sheet-up {
+  animation: sheet-up 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.sheet-down {
+  animation: sheet-down 260ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+
+@keyframes sheet-up {
+  from { opacity: 0; transform: translateY(100%); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes sheet-down {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateY(100%); }
+}
+
+/* ---------------------------------------------------------------- press */
+
+/*
+ * Pointer devices get the lift; touch gets the press. A hover lift on a phone
+ * is a state that arrives with the tap and stays behind after it, which reads
+ * as a stuck button.
+ */
+@media (hover: hover) and (pointer: fine) {
+  .press:hover {
+    transform: translateY(-1px);
+  }
+}
+
+.press {
+  transition: transform 160ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.press:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
 @media (prefers-reduced-motion: reduce) {
+  /*
+   * The rule here is "show me the end, now" — never "hide the thing". Every
+   * entrance below is cancelled rather than frozen, which for `both`-filled
+   * animations means the element renders at its natural position instead of
+   * being stuck at the `from` keyframe.
+   */
   .dashboard-main,
   .chat-bubble,
   .reaction-picker,
@@ -819,8 +1652,85 @@ select:focus-visible {
   .tick-cleared,
   .tick-box[data-done="true"],
   .tick-box[data-done="true"]::after,
-  .photo-carousel-slide {
+  .photo-carousel-slide,
+  .reveal,
+  .count-up[data-bump="true"],
+  .live-dot::before,
+  .greeting-swap,
+  .marquee-track,
+  .orbit-riders,
+  .orbit-dashes,
+  .orbit-avatar,
+  .orbit-home-glyph,
+  .profile-card:hover .profile-lock,
+  .profile-card:focus-visible .profile-lock,
+  .pin-dot[data-filled="true"],
+  .pin-shake,
+  .pin-clearing .pin-dot,
+  .pin-unlocked,
+  .slide-from-left,
+  .slide-from-right,
+  .today-ring::after,
+  .modal-backdrop,
+  .modal-panel,
+  .sending-dots > span,
+  .new-messages-pill,
+  .badge-pop,
+  .just-added,
+  .crown-in,
+  .ken-burns,
+  .float-idle,
+  .spin,
+  .pop-in,
+  .shake,
+  .sheet-up,
+  .sheet-down,
+  .modal-backdrop-out,
+  .modal-out {
     animation: none;
+  }
+
+  html,
+  .dashboard-main,
+  .app-header > div {
+    transition: none;
+  }
+
+  /* Held-back content has to be let through: `.reveal-idle` is invisible on
+     purpose while it waits for the viewport, and with the entrance cancelled
+     nothing else would ever reveal it. */
+  .reveal-idle {
+    opacity: 1;
+  }
+
+  /* The bars are the leaderboard's only way of showing a score, so they are
+     drawn at their value rather than left at zero. */
+  .meter-fill {
+    transform: scaleX(var(--meter, 0));
+    transition: none;
+  }
+
+  /* A struck-through line that never draws is a list with no done state. */
+  .strike::after {
+    transition: none;
+  }
+
+  .collapsible {
+    transition: none;
+  }
+
+  .nav-indicator,
+  .nav-bar-indicator {
+    transition: none;
+  }
+
+  .press,
+  .press:active:not(:disabled),
+  .profile-card:hover,
+  .profile-card:focus-visible,
+  .grid-chip:hover {
+    transform: none;
+    transition: none;
   }
 
   /* Without the draw animation the tick would never appear at all, so it is

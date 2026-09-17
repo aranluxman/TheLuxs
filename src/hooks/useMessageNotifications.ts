@@ -63,6 +63,8 @@ function blip() {
 export function useMessageNotifications(meId: string | null, chatOpen: boolean) {
   const { prefs } = usePrefs();
   const [unread, setUnread] = useState(false);
+  /** How many have arrived since the chat was last open, for the Today card. */
+  const [unreadCount, setUnreadCount] = useState(0);
   const [chatWasOpen, setChatWasOpen] = useState(chatOpen);
 
   /** Resolves a sender id to a name for the notification body. */
@@ -94,7 +96,10 @@ export function useMessageNotifications(meId: string | null, chatOpen: boolean) 
   // would paint the dot once and then immediately re-render without it.
   if (chatOpen !== chatWasOpen) {
     setChatWasOpen(chatOpen);
-    if (chatOpen) setUnread(false);
+    if (chatOpen) {
+      setUnread(false);
+      setUnreadCount(0);
+    }
   }
 
   useEffect(() => {
@@ -114,6 +119,7 @@ export function useMessageNotifications(meId: string | null, chatOpen: boolean) 
           if (row.recipient_id && row.recipient_id !== meId) return;
 
           setUnread(true);
+          setUnreadCount((n) => n + 1);
 
           // No notification for a message you are watching arrive.
           if (chatOpenRef.current && !document.hidden) return;
@@ -152,7 +158,7 @@ export function useMessageNotifications(meId: string | null, chatOpen: boolean) 
     };
   }, [meId]);
 
-  return { unread, setNames };
+  return { unread, unreadCount, setNames };
 }
 
 /**

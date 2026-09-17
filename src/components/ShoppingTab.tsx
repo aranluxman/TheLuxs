@@ -5,6 +5,7 @@ import { useShopping } from "@/hooks/useShopping";
 import { format, parseISO } from "@/lib/dates";
 import type { ShoppingItem } from "@/lib/types";
 import { useFamily } from "./FamilyProvider";
+import { Confetti } from "./motion/Confetti";
 import { Avatar, Button, Card, EmptyState, ErrorNote, SectionTitle, inputClass } from "./ui";
 
 /* --------------------------------------------------------------------- Row */
@@ -12,11 +13,14 @@ import { Avatar, Button, Card, EmptyState, ErrorNote, SectionTitle, inputClass }
 function ItemRow({
   item,
   done,
+  leaving,
   onToggle,
   onRemove,
 }: {
   item: ShoppingItem;
   done: boolean;
+  /** Ticked, and folding out of the list on its way to Got it. */
+  leaving?: boolean;
   onToggle: () => void;
   onRemove: () => void;
 }) {
@@ -25,7 +29,10 @@ function ItemRow({
   const ticker = item.completed_by ? byId[item.completed_by] : null;
 
   return (
-    <li
+    // Folds to nothing rather than disappearing: a trolley list that jumps as
+    // you tick is one you have to re-read to see what you just did.
+    <li className="collapsible" data-open={leaving ? "false" : "true"}>
+    <div
       className="tick-row group hover:bg-sunk/50 flex items-center gap-3 rounded-xl px-2 py-2.5 transition-colors"
       data-done={done}
     >
@@ -53,9 +60,10 @@ function ItemRow({
           </svg>
         </span>
         <span className="min-w-0 flex-1">
+          {/* Drawn across, not switched on — see the .strike rules. */}
           <span
-            className={`tick-label block truncate text-sm ${
-              done ? "text-faint line-through" : "font-medium"
+            className={`tick-label strike block truncate text-sm ${
+              done ? "text-faint" : "font-medium"
             }`}
           >
             {item.name}
@@ -90,6 +98,7 @@ function ItemRow({
       >
         ×
       </button>
+    </div>
     </li>
   );
 }
@@ -97,7 +106,7 @@ function ItemRow({
 /* --------------------------------------------------------------------- Tab */
 
 export function ShoppingTab() {
-  const { currentMember } = useFamily();
+  const { currentMember, members } = useFamily();
   const { items, loading, error, addItem, setDone, removeItem, clearCompleted } = useShopping();
 
   const [name, setName] = useState("");
@@ -106,16 +115,46 @@ export function ShoppingTab() {
   const [showDone, setShowDone] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
 
+  /*
+   * Items ticked in the last third of a second. The write goes out at the
+   * moment of the tap — nothing waits on an animation — and this only keeps the
+   * row in place while it folds. See TodosTab for the same pattern.
+   */
+  const [leaving, setLeaving] = useState<string[]>([]);
+
   const { toBuy, done } = useMemo(() => {
     const open: ShoppingItem[] = [];
     const finished: ShoppingItem[] = [];
-    for (const i of items) (i.completed_at ? finished : open).push(i);
+    for (const i of items) {
+      if (i.completed_at && leaving.includes(i.id)) open.push(i);
+      else (i.completed_at ? finished : open).push(i);
+    }
     // Open items oldest first — the order they were thought of. Completed
     // items most recently ticked first, so the last thing you grabbed is on top.
     open.sort((a, b) => a.created_at.localeCompare(b.created_at));
     finished.sort((a, b) => (b.completed_at ?? "").localeCompare(a.completed_at ?? ""));
     return { toBuy: open, done: finished };
-  }, [items]);
+  }, [items, leaving]);
+
+  /** Tick it off, and fold the row away. */
+  function pickUp(id: string) {
+    setLeaving((ids) => (ids.includes(id) ? ids : [...ids, id]));
+    void setDone(id, true, currentMember?.id ?? null);
+    setTimeout(() => setLeaving((ids) => ids.filter((x) => x !== id)), 340);
+  }
+
+  /*
+   * The last thing off the list is the one genuine moment of completion in this
+   * app, and it gets a burst of paper — once, on the transition into cleared,
+   * never on arriving at a list that was already empty.
+   */
+  const cleared = toBuy.length === 0 && done.length > 0;
+  const [wasCleared, setWasCleared] = useState(false);
+  const [burst, setBurst] = useState(0);
+  if (cleared !== wasCleared) {
+    setWasCleared(cleared);
+    if (cleared) setBurst((n) => n + 1);
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -198,7 +237,10 @@ export function ShoppingTab() {
                shop is the one genuine moment of completion in this app, and an
                empty state that says "Nothing on the list" reads as though the
                list were never there. */
-            <div className="tick-cleared flex flex-col items-center gap-2 px-6 py-10 text-center">
+            <div className="tick-cleared relative flex flex-col items-center gap-2 px-6 py-10 text-center">
+              {burst > 0 ? (
+                <Confetti burstKey={burst} colors={members.map((m) => m.color)} />
+              ) : null}
               <span
                 className="bg-accent grid h-14 w-14 place-items-center rounded-full"
                 aria-hidden
@@ -227,13 +269,15 @@ export function ShoppingTab() {
               hint="Add what you need above and it appears on everyone's phone."
             />
           ) : (
-            <ul className="p-2">
+            /* Fades in as the skeleton above goes. */
+            <ul className="reveal p-2">
               {toBuy.map((i) => (
                 <ItemRow
                   key={i.id}
                   item={i}
                   done={false}
-                  onToggle={() => void setDone(i.id, true, currentMember?.id ?? null)}
+                  onToggle={() => pickUp(i.id)}
+                  leaving={leaving.includes(i.id)}
                   onRemove={() => void removeItem(i.id)}
                 />
               ))}
@@ -253,7 +297,12 @@ export function ShoppingTab() {
               aria-expanded={showDone}
               className="text-muted hover:text-ink flex items-center gap-1.5 text-[11px] font-bold tracking-[0.14em] uppercase"
             >
-              <span aria-hidden className={showDone ? "" : "-rotate-90"}>
+              <span
+                aria-hidden
+                className={`inline-block transition-transform duration-300 ${
+                  showDone ? "" : "-rotate-90"
+                }`}
+              >
                 ▾
               </span>
               Got it · {done.length}
@@ -268,7 +317,8 @@ export function ShoppingTab() {
             ) : null}
           </div>
 
-          {showDone ? (
+          <div className="collapsible" data-open={showDone ? "true" : "false"}>
+            <div>
             <Card>
               <ul className="p-2">
                 {done.map((i) => (
@@ -282,7 +332,8 @@ export function ShoppingTab() {
                 ))}
               </ul>
             </Card>
-          ) : null}
+            </div>
+          </div>
         </section>
       ) : null}
     </div>

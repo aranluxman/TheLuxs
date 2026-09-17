@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useMessageNotifications } from "@/hooks/useMessageNotifications";
 import { usePrefs } from "@/hooks/usePrefs";
 import { useTabActivity, type ActivityTab } from "@/hooks/useTabActivity";
@@ -46,6 +46,53 @@ function isActivityTab(id: TabId): id is ActivityTab {
   return ACTIVITY_TABS.has(id);
 }
 
+/**
+ * Follows the current tab with one pill rather than lighting up whichever
+ * button is active.
+ *
+ * The position and width are *measured* from the live buttons and written into
+ * two custom properties, because the tabs are text and a label's width depends
+ * on the font, the text-size setting and the language. Measuring is also what
+ * lets the pill keep up when the content width setting changes under it.
+ *
+ * Returns a ref for the container and one for the buttons to register with.
+ */
+function useNavIndicator(active: string) {
+  const containerRef = useRef<HTMLElement | null>(null);
+  const items = useRef(new Map<string, HTMLElement>());
+  const [box, setBox] = useState<{ x: number; w: number } | null>(null);
+
+  const measure = useCallback(() => {
+    const container = containerRef.current;
+    const el = items.current.get(active);
+    if (!container || !el) return;
+    const c = container.getBoundingClientRect();
+    const b = el.getBoundingClientRect();
+    setBox({ x: Math.round(b.left - c.left), w: Math.round(b.width) });
+  }, [active]);
+
+  // Before paint, so the pill is never a frame behind the tab it belongs to.
+  useLayoutEffect(measure, [measure]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [measure]);
+
+  const register = useCallback(
+    (id: string) => (el: HTMLElement | null) => {
+      if (el) items.current.set(id, el);
+      else items.current.delete(id);
+    },
+    [],
+  );
+
+  return { containerRef, register, box };
+}
+
 /** "Something happened here since you last looked." */
 function NavDot() {
   return (
@@ -71,7 +118,18 @@ export function Shell() {
 
   const { unseen, markSeen } = useTabActivity();
 
-  const { unread: chatUnread, setNames } = useMessageNotifications(
+  const {
+    containerRef: headerNavRef,
+    register: registerHeaderTab,
+    box: headerBox,
+  } = useNavIndicator(tab);
+  const {
+    containerRef: barNavRef,
+    register: registerBarTab,
+    box: barBox,
+  } = useNavIndicator(tab);
+
+  const { unread: chatUnread, unreadCount, setNames } = useMessageNotifications(
     currentMember?.id ?? null,
     tab === "chat",
   );
@@ -142,14 +200,34 @@ export function Shell() {
               The glyphs are dropped up here: at five tabs they were the
               difference between fitting and wrapping, and unlike in the bottom
               bar they sit beside a label that already says the same thing. */}
-          <nav className="mx-auto hidden gap-1 lg:flex" aria-label="Sections">
+          <nav
+            ref={headerNavRef as React.Ref<HTMLElement>}
+            className="relative mx-auto hidden gap-1 lg:flex"
+            aria-label="Sections"
+          >
+            {/* One pill that slides, rather than a fill that jumps between
+                buttons. Decorative — `aria-current` on the button is what
+                actually says which section you are in. */}
+            {headerBox ? (
+              <span
+                className="nav-indicator inset-y-0"
+                style={
+                  {
+                    "--nav-x": `${headerBox.x}px`,
+                    "--nav-w": `${headerBox.w}px`,
+                  } as React.CSSProperties
+                }
+                aria-hidden
+              />
+            ) : null}
             {TABS.map((t) => (
               <button
                 key={t.id}
+                ref={registerHeaderTab(t.id)}
                 onClick={() => setTab(t.id)}
                 aria-current={tab === t.id ? "page" : undefined}
-                className={`relative inline-flex items-center rounded-xl px-3 py-2 text-sm font-semibold transition-[background-color,color,transform] ${
-                  tab === t.id ? "bg-ink text-on-ink shadow-sm" : "text-muted hover:bg-sunk"
+                className={`press relative z-[1] inline-flex items-center rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
+                  tab === t.id ? "text-on-ink" : "text-muted hover:bg-sunk"
                 }`}
               >
                 {t.label}
@@ -193,8 +271,14 @@ export function Shell() {
         </div>
       </header>
 
-      <main className={`dashboard-main mx-auto w-full ${width} flex-1 px-4 pt-5 pb-24 lg:pb-8`}>
-        {tab === "calendar" ? <CalendarTab /> : null}
+      {/* Keyed on the tab so `page-enter` replays on every switch. It does not
+          replay behind the picker: the shell only mounts once a profile has
+          been chosen. */}
+      <main
+        key={tab}
+        className={`dashboard-main mx-auto w-full ${width} flex-1 px-4 pt-5 pb-24 lg:pb-8`}
+      >
+        {tab === "calendar" ? <CalendarTab unreadCount={unreadCount} /> : null}
         {tab === "todos" ? <TodosTab /> : null}
         {tab === "chores" ? <ChoresTab /> : null}
         {tab === "shopping" ? <ShoppingTab /> : null}
@@ -203,19 +287,34 @@ export function Shell() {
       </main>
 
       <nav
+        ref={barNavRef as React.Ref<HTMLElement>}
         className="mobile-nav glass-panel border-line fixed inset-x-0 bottom-0 z-30 grid grid-cols-6 border-t pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden"
         aria-label="Sections"
       >
+        {/* The same idea as the header's pill, at the other end of the screen:
+            a short rule that slides along the top edge of the bar. */}
+        {barBox ? (
+          <span
+            className="nav-bar-indicator"
+            style={
+              {
+                "--nav-x": `${barBox.x}px`,
+                "--nav-w": `${barBox.w}px`,
+              } as React.CSSProperties
+            }
+            aria-hidden
+          />
+        ) : null}
         {TABS.map((t) => (
           <button
             key={t.id}
+            ref={registerBarTab(t.id)}
             onClick={() => setTab(t.id)}
             aria-current={tab === t.id ? "page" : undefined}
-            className={`relative flex min-h-14 flex-col items-center justify-center gap-0.5 px-1 py-2.5 text-[10.5px] font-semibold transition-colors ${
+            className={`press relative flex min-h-14 flex-col items-center justify-center gap-0.5 px-1 py-2.5 text-[10.5px] font-semibold transition-colors ${
               tab === t.id ? "text-ink" : "text-faint"
             }`}
           >
-            {tab === t.id ? <span className="bg-accent absolute top-0 h-0.5 w-10 rounded-full" aria-hidden /> : null}
             <span className="relative text-lg" aria-hidden>
               {t.icon}
               {tab !== t.id && isActivityTab(t.id) && unseen[t.id] ? <NavDot /> : null}

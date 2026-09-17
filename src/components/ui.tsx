@@ -109,13 +109,16 @@ type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
 };
 
 export function Button({ variant = "primary", className = "", ...rest }: ButtonProps) {
+  // `press` owns the lift and the tap squash — hover only where there is a
+  // pointer, so a phone does not leave a button looking stuck after a tap. See
+  // the .press rules in globals.css.
   const base =
-    "inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold " +
+    "press inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold " +
     "transition-[background-color,border-color,color,transform,box-shadow] duration-200 disabled:cursor-not-allowed disabled:opacity-45 " +
     "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink";
   const variants = {
-    primary: "bg-ink text-on-ink shadow-sm hover:-translate-y-px hover:shadow-md",
-    ghost: "border border-line bg-surface text-ink shadow-sm hover:-translate-y-px hover:bg-sunk",
+    primary: "bg-ink text-on-ink shadow-sm hover:shadow-md",
+    ghost: "border border-line bg-surface text-ink shadow-sm hover:bg-sunk",
     danger: "text-danger hover:bg-danger-soft",
   };
   return <button className={`${base} ${variants[variant]} ${className}`} {...rest} />;
@@ -212,6 +215,30 @@ export function Modal({
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
 
+  /*
+   * Closing is animated, which means the panel has to outlive `open` by the
+   * length of the animation. `phase` is that extra life: React is told to keep
+   * rendering while it is "closing", and the element is dropped when the timer
+   * ends rather than the moment the prop flips.
+   *
+   * Everything else — Escape, the focus move, the scroll lock — keys off
+   * `open`, so a dialog on its way out is already inert.
+   */
+  const [phase, setPhase] = useState<"shut" | "open" | "closing">(open ? "open" : "shut");
+
+  // Both transitions are adjusted during render rather than in an effect: they
+  // are state derived from a prop changing, and an effect would paint one frame
+  // of the old phase first — which for the opening case is a frame of a dialog
+  // that has not started animating yet.
+  if (open && phase !== "open") setPhase("open");
+  if (!open && phase === "open") setPhase("closing");
+
+  useEffect(() => {
+    if (phase !== "closing") return;
+    const id = setTimeout(() => setPhase("shut"), 220);
+    return () => clearTimeout(id);
+  }, [phase]);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -228,21 +255,32 @@ export function Modal({
     };
   }, [open, onClose]);
 
-  if (!open) return null;
+  if (phase === "shut") return null;
+
+  const closing = phase === "closing";
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/45 p-0 backdrop-blur-[2px] sm:items-center sm:p-4"
+      className={`modal-backdrop fixed inset-0 z-50 flex items-end justify-center bg-black/45 p-0 backdrop-blur-[2px] sm:items-center sm:p-4 ${
+        closing ? "modal-backdrop-out" : ""
+      }`}
       role="dialog"
       aria-modal="true"
       aria-label={title}
+      // A panel on its way out must not swallow a tap meant for what is behind
+      // it — by this point the dialog is gone as far as the app is concerned.
+      style={closing ? { pointerEvents: "none" } : undefined}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
       <div
         ref={panelRef}
-        className="bg-surface max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-3xl p-5 shadow-2xl sm:rounded-3xl sm:p-6"
+        className={`bg-surface max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-3xl p-5 shadow-2xl sm:rounded-3xl sm:p-6 ${
+          // On a phone this is a bottom sheet, so it arrives and leaves the way
+          // a sheet does; on a desktop it is a dialog and scales in place.
+          closing ? "sheet-down sm:modal-out" : "sheet-up sm:modal-panel"
+        }`}
       >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold">{title}</h2>

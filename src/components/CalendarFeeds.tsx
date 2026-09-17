@@ -20,6 +20,13 @@ export function CalendarFeeds({
   onSynced: () => void;
 }) {
   const { members, currentMember } = useFamily();
+  /**
+   * What the last run did, for the glyph beside the button. `idle` until
+   * somebody presses it; `done` reverts after a couple of seconds so the tick
+   * belongs to a run rather than becoming the button's permanent face.
+   */
+  const [syncState, setSyncState] = useState<"idle" | "done" | "failed">("idle");
+
   const { feeds, syncing, error, addFeed, importIcs, syncFeed, syncAll, removeFeed } =
     useCalendarFeeds(open);
 
@@ -30,6 +37,25 @@ export function CalendarFeeds({
   const [ics, setIcs] = useState("");
 
   const owner = memberId || currentMember?.id || members[0]?.id || "";
+
+  /**
+   * Run every feed, and remember how it went.
+   *
+   * `syncAll` reports a failure through the hook's own `error`, which the note
+   * at the top of this dialog already shows — this only decides which of the
+   * three glyphs the button wears, and clears itself so the tick cannot become
+   * permanent furniture.
+   */
+  async function runSyncAll() {
+    setSyncState("idle");
+    const results = await syncAll();
+    onSynced();
+    // An empty list means the call itself did not get through; a result with an
+    // `error` means one feed did not. Both are a shake.
+    const failed = results.length === 0 || results.some((r) => r.error);
+    setSyncState(failed ? "failed" : "done");
+    setTimeout(() => setSyncState("idle"), 2400);
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -171,15 +197,26 @@ export function CalendarFeeds({
         )}
 
         <div className="flex items-center justify-between gap-2 pt-2">
+          {/*
+           * The glyph is the status: it spins while the run is in flight, pops
+           * into a tick when it lands, and shakes on a failure beside the error
+           * the hook already surfaces. Three states in one character, next to
+           * the words that say what it is doing.
+           */}
           <button
             type="button"
-            onClick={async () => {
-              await syncAll();
-              onSynced();
-            }}
+            onClick={() => void runSyncAll()}
             disabled={syncing || feeds.every((f) => !f.has_url)}
-            className="text-muted hover:text-ink text-xs disabled:opacity-40"
+            className="text-muted hover:text-ink inline-flex items-center gap-1.5 text-xs disabled:opacity-40"
           >
+            <span
+              className={
+                syncing ? "spin" : syncState === "done" ? "pop-in" : syncState === "failed" ? "shake" : ""
+              }
+              aria-hidden
+            >
+              {syncing ? "↻" : syncState === "done" ? "✓" : syncState === "failed" ? "↻" : "↻"}
+            </span>
             Sync everything now
           </button>
           <div className="flex gap-2">

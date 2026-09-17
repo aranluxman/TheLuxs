@@ -26,6 +26,10 @@ import {
 import { tint } from "@/lib/palette";
 import type { ChoreTick, MemberWithPhoto } from "@/lib/types";
 import { useFamily } from "./FamilyProvider";
+import { Confetti } from "./motion/Confetti";
+import { CountUp } from "./motion/CountUp";
+import { Reveal } from "./motion/Reveal";
+import { useInView } from "@/hooks/useInView";
 import { Avatar, Button, Card, EmptyState, ErrorNote } from "./ui";
 
 /**
@@ -79,6 +83,9 @@ function useStandings(scores: Record<string, number>): Standing[] {
 
 function Leaderboard({ scores }: { scores: Record<string, number> }) {
   const standings = useStandings(scores);
+  // The bars are the whole point of the panel, so they grow when somebody is
+  // actually looking at them rather than while the tab is still painting.
+  const { ref, inView } = useInView<HTMLOListElement>({ amount: 0.3 });
   const total = standings.reduce((sum, s) => sum + s.points, 0);
   const top = standings[0]?.points ?? 0;
   const leaders = standings.filter((s) => s.leader);
@@ -94,13 +101,13 @@ function Leaderboard({ scores }: { scores: Record<string, number> }) {
           <p className="text-faint text-[11px]">{weekLabel} · resets Monday</p>
         </div>
         <p className="text-muted text-xs tabular-nums">
-          <span className="text-accent font-bold">{total}</span> of{" "}
+          <CountUp value={total} className="text-accent font-bold" /> of{" "}
           {POINTS_AVAILABLE_PER_WEEK} points claimed
         </p>
       </div>
 
-      <ol className="divide-line divide-y">
-        {standings.map((s) => (
+      <ol ref={ref} className="divide-line divide-y">
+        {standings.map((s, i) => (
           <li
             key={s.member.id}
             className="flex items-center gap-3 px-4 py-2.5"
@@ -111,7 +118,8 @@ function Leaderboard({ scores }: { scores: Record<string, number> }) {
                 s.leader ? "text-accent" : "text-faint"
               }`}
             >
-              {s.leader ? "👑" : s.rank}
+              {/* The crown drops in once, on whoever is actually ahead. */}
+              {s.leader ? <span className="crown-in">👑</span> : s.rank}
             </span>
 
             <Avatar member={s.member} size="sm" ring={s.leader} />
@@ -121,19 +129,24 @@ function Leaderboard({ scores }: { scores: Record<string, number> }) {
               {/* A bar against the leader's score, not against the weekly
                   maximum: the question on a scoreboard is "how far behind am
                   I", and against 31 every real score is a sliver. */}
+              {/* Scaled rather than widened: `width` is a layout property and
+                  five of them animating at once is five reflows a frame, where
+                  a transform is handed straight to the compositor. */}
               <span className="bg-sunk mt-1 block h-1.5 overflow-hidden rounded-full">
                 <span
-                  className="block h-full rounded-full transition-[width] duration-500"
+                  className="meter-fill block h-full w-full rounded-full"
+                  data-grown={inView ? "true" : undefined}
                   style={{
-                    width: top > 0 ? `${(s.points / top) * 100}%` : "0%",
+                    "--meter": top > 0 ? s.points / top : 0,
                     backgroundColor: s.member.color,
-                  }}
+                    transitionDelay: `${i * 100}ms`,
+                  } as React.CSSProperties}
                 />
               </span>
             </span>
 
             <span className="shrink-0 text-right">
-              <span className="block text-sm font-bold tabular-nums">{s.points}</span>
+              <CountUp value={s.points} className="block text-sm font-bold" />
               <span className="text-faint block text-[10px]">
                 {s.points === 1 ? "point" : "points"}
               </span>
@@ -183,7 +196,7 @@ function ChoreCard({
 
   return (
     <Card
-      className="chore-card tile-lift flex flex-col gap-3 p-4"
+      className="chore-card tile-lift flex h-full flex-col gap-3 p-4"
       data-done={done}
       style={
         ticks[0]?.done_by && byId[ticks[0].done_by]
@@ -330,7 +343,10 @@ function History() {
         </Button>
       </div>
 
-      {open ? (
+      {/* Opened and closed in place: `grid-template-rows` is the one way to
+          animate "to the height of my content" without measuring it. */}
+      <div className="collapsible" data-open={open ? "true" : "false"}>
+        <div>
         <div className="space-y-3">
           <ErrorNote message={error} />
 
@@ -379,7 +395,7 @@ function History() {
                             i === 0 ? "text-accent" : "text-faint"
                           }`}
                         >
-                          {i === 0 ? "🥇" : i + 1}
+                          {i === 0 ? <span className="crown-in">🥇</span> : i + 1}
                         </span>
                         <Avatar member={member} size="sm" ring={i === 0} />
                         <span className="min-w-0 flex-1">
@@ -397,9 +413,7 @@ function History() {
                           </span>
                         </span>
                         <span className="shrink-0 text-right">
-                          <span className="block text-sm font-bold tabular-nums">
-                            {row.chores}
-                          </span>
+                          <CountUp value={row.chores} className="block text-sm font-bold" />
                           <span className="text-faint block text-[10px] tabular-nums">
                             {row.points} {row.points === 1 ? "point" : "points"}
                           </span>
@@ -458,7 +472,8 @@ function History() {
             </>
           )}
         </div>
-      ) : null}
+        </div>
+      </div>
     </section>
   );
 }
@@ -466,9 +481,26 @@ function History() {
 /* --------------------------------------------------------------------- tab */
 
 export function ChoresTab() {
+  const { members } = useFamily();
   const { ticksFor, toggleMember, scores, progress, loading, error } = useChores();
 
   const pct = progress.total === 0 ? 0 : Math.round((progress.done / progress.total) * 100);
+
+  /*
+   * The board being finished is worth marking — once.
+   *
+   * Keyed on the transition into "everything done" rather than on the state
+   * itself: without that, every re-render while the board sits complete would
+   * throw another handful of paper, and coming back to the tab tomorrow would
+   * celebrate yesterday's work again.
+   */
+  const cleared = progress.total > 0 && progress.done === progress.total;
+  const [wasCleared, setWasCleared] = useState(false);
+  const [burst, setBurst] = useState(0);
+  if (cleared !== wasCleared) {
+    setWasCleared(cleared);
+    if (cleared) setBurst((n) => n + 1);
+  }
 
   return (
     <div className="space-y-6">
@@ -509,7 +541,7 @@ export function ChoresTab() {
               </p>
             </div>
             <div
-              className="bg-sunk h-2 overflow-hidden rounded-full"
+              className="bg-sunk relative h-2 overflow-visible rounded-full"
               role="progressbar"
               aria-valuenow={progress.done}
               aria-valuemin={0}
@@ -520,7 +552,17 @@ export function ChoresTab() {
                 className="bg-accent h-full rounded-full transition-[width] duration-500"
                 style={{ width: `${pct}%` }}
               />
+              {/* Thrown from the bar that just filled, in the family's own
+                  colours. Twenty pieces, 1.2s, then removed from the DOM. */}
+              {burst > 0 ? (
+                <Confetti burstKey={burst} colors={members.map((m) => m.color)} />
+              ) : null}
             </div>
+            {cleared ? (
+              <p className="text-success mt-2 text-center text-xs font-semibold" role="status">
+                Every chore on the board is done. Nothing left to do.
+              </p>
+            ) : null}
           </div>
 
           {/* --------------------------------------------------------- board */}
@@ -536,13 +578,14 @@ export function ChoresTab() {
                   <p className="text-faint mt-0.5 text-xs">{cadence.blurb}</p>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
-                  {group.map((chore) => (
+                  {group.map((chore, i) => (
+                    <Reveal key={chore.key} when="in-view" delay={i * 60} className="h-full">
                     <ChoreCard
-                      key={chore.key}
                       chore={chore}
                       ticks={ticksFor(chore)}
                       onToggleMember={(memberId) => void toggleMember(chore, memberId)}
                     />
+                    </Reveal>
                   ))}
                 </div>
               </section>

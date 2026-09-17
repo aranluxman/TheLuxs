@@ -409,7 +409,15 @@ const WEEKDAY_INITIALS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 /** How many items a month cell shows before it gives up and counts them. */
 const MONTH_CELL_LIMIT = 3;
 
-function GridChip({ item, onOpen }: { item: AgendaItem; onOpen: () => void }) {
+function GridChip({
+  item,
+  onOpen,
+  delay = 0,
+}: {
+  item: AgendaItem;
+  onOpen: () => void;
+  delay?: number;
+}) {
   const { byId } = useFamily();
   const owner = item.memberIds.map((id) => byId[id]).find(Boolean);
   const color = owner?.color ?? "#a8a29e";
@@ -419,7 +427,8 @@ function GridChip({ item, onOpen }: { item: AgendaItem; onOpen: () => void }) {
       type="button"
       onClick={onOpen}
       title={`${item.start ? `${formatTime(item.start)} · ` : ""}${item.title}`}
-      className="hover:bg-sunk flex w-full min-w-0 items-center gap-1 rounded px-1 py-0.5 text-left text-[11px] leading-tight"
+      className="grid-chip reveal hover:bg-sunk flex w-full min-w-0 items-center gap-1 rounded px-1 py-0.5 text-left text-[11px] leading-tight"
+      style={{ animationDelay: delay ? `${delay}ms` : undefined }}
     >
       <span
         className="h-1.5 w-1.5 shrink-0 rounded-full"
@@ -439,17 +448,19 @@ function CalendarGrid({
   anchor,
   itemsByDay,
   onOpen,
+  className = "",
 }: {
   span: "month" | "week";
   anchor: Date;
   itemsByDay: Map<string, AgendaItem[]>;
   onOpen: (item: AgendaItem) => void;
+  className?: string;
 }) {
   const days = span === "month" ? monthGridDays(anchor) : weekDaysOf(anchor);
   const today = new Date();
 
   return (
-    <Card className="overflow-hidden">
+    <Card className={`overflow-hidden ${className}`}>
       <div className="border-line text-faint grid grid-cols-7 border-b text-center text-[10px] font-bold tracking-[0.08em] uppercase">
         {WEEKDAY_INITIALS.map((d) => (
           <span key={d} className="py-2">
@@ -480,7 +491,7 @@ function CalendarGrid({
               <p
                 className={`mb-0.5 px-1 text-[11px] font-semibold tabular-nums ${
                   isToday
-                    ? "bg-accent text-on-ink inline-block rounded-full px-1.5"
+                    ? "today-ring bg-accent text-on-ink relative inline-block rounded-full px-1.5"
                     : outside
                       ? "text-faint"
                       : "text-muted"
@@ -490,8 +501,11 @@ function CalendarGrid({
               </p>
 
               <div className="space-y-0.5">
-                {shown.map((i) => (
-                  <GridChip key={i.id} item={i} onOpen={() => onOpen(i)} />
+                {/* Staggered by position in the cell, not across the whole
+                    month: forty chips each waiting on the one before would take
+                    two seconds to finish drawing a calendar. */}
+                {shown.map((i, n) => (
+                  <GridChip key={i.id} item={i} onOpen={() => onOpen(i)} delay={n * 40} />
                 ))}
                 {items.length > shown.length ? (
                   <p className="text-faint px-1 text-[10px] font-semibold">
@@ -509,7 +523,7 @@ function CalendarGrid({
 
 /* ------------------------------------------------------------------- Tab */
 
-export function CalendarTab() {
+export function CalendarTab({ unreadCount = 0 }: { unreadCount?: number }) {
   const { members, currentMember } = useFamily();
 
   const { prefs } = usePrefs();
@@ -523,6 +537,21 @@ export function CalendarTab() {
   const [span, setSpan] = useState<"month" | "week">("month");
   /** Which month or week the grid is showing. The list view ignores it. */
   const [anchor, setAnchor] = useState<Date>(() => new Date());
+  /**
+   * Which way the last change went, and a counter that makes each change a new
+   * key. Both exist for one reason: paging a calendar should move in the
+   * direction you asked for, and React will not replay an animation on an
+   * element it considers unchanged.
+   */
+  const [travel, setTravel] = useState<{ dir: "forward" | "back"; step: number }>({
+    dir: "forward",
+    step: 0,
+  });
+
+  const go = useCallback((dir: "forward" | "back", move: (d: Date) => Date) => {
+    setTravel((t) => ({ dir, step: t.step + 1 }));
+    setAnchor(move);
+  }, []);
   const [visibleDays, setVisibleDays] = useState(DAYS_PER_PAGE);
   const [open, setOpen] = useState(false);
   const [feedsOpen, setFeedsOpen] = useState(false);
@@ -674,7 +703,7 @@ export function CalendarTab() {
     <div className="space-y-7">
       <ErrorNote message={error} />
 
-      <TodayCard />
+      <TodayCard agenda={agenda} unreadCount={unreadCount} />
 
       {/* Directly under the date, because "what is it doing out there" is read
           in the same glance as "what day is it" on the way out of the door. */}
@@ -823,7 +852,7 @@ export function CalendarTab() {
           <div className="flex items-center gap-2">
             <button
               onClick={() =>
-                setAnchor((d) => (span === "month" ? addMonths(d, -1) : addWeeks(d, -1)))
+                go("back", (d) => (span === "month" ? addMonths(d, -1) : addWeeks(d, -1)))
               }
               className="border-line bg-surface text-ink hover:bg-sunk grid h-9 w-9 place-items-center rounded-full border text-sm"
               aria-label={span === "month" ? "Previous month" : "Previous week"}
@@ -832,7 +861,7 @@ export function CalendarTab() {
             </button>
             <button
               onClick={() =>
-                setAnchor((d) => (span === "month" ? addMonths(d, 1) : addWeeks(d, 1)))
+                go("forward", (d) => (span === "month" ? addMonths(d, 1) : addWeeks(d, 1)))
               }
               className="border-line bg-surface text-ink hover:bg-sunk grid h-9 w-9 place-items-center rounded-full border text-sm"
               aria-label={span === "month" ? "Next month" : "Next week"}
@@ -850,13 +879,17 @@ export function CalendarTab() {
             <Button
               variant="ghost"
               className="ml-auto min-h-9 px-3 py-1.5 text-xs"
-              onClick={() => setAnchor(new Date())}
+              onClick={() => go("back", () => new Date())}
             >
               Today
             </Button>
           </div>
 
+          {/* Keyed on the step so every press mounts a fresh grid and the slide
+              actually runs; the direction decides which side it comes from. */}
           <CalendarGrid
+            key={`${span}:${travel.step}`}
+            className={travel.dir === "forward" ? "slide-from-right" : "slide-from-left"}
             span={span}
             anchor={span === "month" ? startOfMonth(anchor) : anchor}
             itemsByDay={gridByDay}
@@ -886,7 +919,7 @@ export function CalendarTab() {
         </Card>
       ) : (
         <div className="space-y-4">
-          {shownDays.map(([key, items]) => {
+          {shownDays.map(([key, items], dayIndex) => {
             const date = parseDayKey(key);
             const today = isSameDay(date, new Date());
             return (
@@ -907,7 +940,9 @@ export function CalendarTab() {
                     {items.length}
                   </span>
                 </div>
-                <Card>
+                <Card className={dayIndex < 4 ? "reveal" : ""}
+                  style={dayIndex < 4 ? { animationDelay: `${dayIndex * 60}ms` } : undefined}
+                >
                   <ul className="p-2">
                     {items.map((i) => (
                       <AgendaRow
