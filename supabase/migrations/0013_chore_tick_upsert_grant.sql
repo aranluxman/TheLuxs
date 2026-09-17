@@ -1,0 +1,53 @@
+-- ============================================================================
+--  Family Dashboard — let the chore board's upsert actually run
+--
+--  Tapping a face on a chore card failed with
+--    permission denied for table family_chore_ticks
+--  even though every policy on the table is `using (true)`, and even though
+--  0010 granted exactly the columns a reassignment writes.
+--
+--  The gap is in how PostgREST compiles an upsert. `useChores.ts` calls
+--
+--    .upsert({ chore_key, period_key, done_by, done_at },
+--            { onConflict: "chore_key,period_key" })
+--
+--  and PostgREST turns that into
+--
+--    insert into family_chore_ticks (chore_key, period_key, done_by, done_at)
+--    values (...)
+--    on conflict (chore_key, period_key) do update
+--      set chore_key  = excluded.chore_key,
+--          period_key = excluded.period_key,     -- <= these two
+--          done_by    = excluded.done_by,
+--          done_at    = excluded.done_at;
+--
+--  It re-sets *every column in the payload*, including the two that form the
+--  conflict target. There is no way to tell it not to. So the statement needs
+--  UPDATE on `chore_key` and `period_key` — which 0008 revoked and 0010, aiming
+--  squarely at "a reassignment writes done_by and done_at", did not give back.
+--  Postgres checks column privileges when it plans the statement, not when a
+--  conflict actually happens, so this failed on the very first tap of a chore
+--  nobody had ticked yet.
+--
+--  Granting them back costs nothing in practice: on the conflict path those two
+--  columns are only ever set to `excluded.<itself>`, which is by definition the
+--  value that matched the conflict target. The row cannot move to a different
+--  chore or a different week through this path.
+--
+--  It does widen what a hand-crafted UPDATE could do — someone holding the
+--  publishable key could now move a tick between chores in the same way they
+--  could already delete it and re-insert it, which `family_chore_ticks_remove`
+--  and `family_chore_ticks_add` both permit with `using (true)`. So this grants
+--  no capability that was not already reachable in two statements. As
+--  everywhere else in this schema, the real answer is auth — see 0005 PART 3.
+--
+--  Idempotent: safe to re-run.
+-- ============================================================================
+
+grant update (chore_key, period_key) on public.family_chore_ticks
+  to anon, authenticated;
+
+-- PostgREST caches column privileges alongside the schema. Without this the
+-- next tap can still be refused by a stale cache, on a database that is by then
+-- already correct — which looks exactly like the bug not being fixed.
+notify pgrst, 'reload schema';

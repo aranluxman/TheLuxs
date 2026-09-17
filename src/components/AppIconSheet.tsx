@@ -2,6 +2,7 @@
 
 import { useRef } from "react";
 import { useAppIcon } from "./AppIconProvider";
+import { BrandMark } from "./BrandMark";
 import { Button, ErrorNote, Modal } from "./ui";
 
 /**
@@ -28,12 +29,7 @@ export function AppIconSheet({ open, onClose }: { open: boolean; onClose: () => 
             /* eslint-disable-next-line @next/next/no-img-element */
             <img src={iconUrl} alt="The current app icon" className="h-full w-full object-cover" />
           ) : (
-            /* eslint-disable-next-line @next/next/no-img-element */
-            <img
-              src="/icons/icon-192.png"
-              alt="The default app icon"
-              className="h-full w-full object-cover"
-            />
+            <BrandMark title="The default app icon" className="h-full w-full" />
           )}
         </span>
 

@@ -20,6 +20,13 @@ export function CalendarFeeds({
   onSynced: () => void;
 }) {
   const { members, currentMember } = useFamily();
+  /**
+   * What the last run did, for the glyph beside the button. `idle` until
+   * somebody presses it; `done` reverts after a couple of seconds so the tick
+   * belongs to a run rather than becoming the button's permanent face.
+   */
+  const [syncState, setSyncState] = useState<"idle" | "done" | "failed">("idle");
+
   const { feeds, syncing, error, addFeed, importIcs, syncFeed, syncAll, removeFeed } =
     useCalendarFeeds(open);
 
@@ -30,6 +37,25 @@ export function CalendarFeeds({
   const [ics, setIcs] = useState("");
 
   const owner = memberId || currentMember?.id || members[0]?.id || "";
+
+  /**
+   * Run every feed, and remember how it went.
+   *
+   * `syncAll` reports a failure through the hook's own `error`, which the note
+   * at the top of this dialog already shows — this only decides which of the
+   * three glyphs the button wears, and clears itself so the tick cannot become
+   * permanent furniture.
+   */
+  async function runSyncAll() {
+    setSyncState("idle");
+    const results = await syncAll();
+    onSynced();
+    // An empty list means the call itself did not get through; a result with an
+    // `error` means one feed did not. Both are a shake.
+    const failed = results.length === 0 || results.some((r) => r.error);
+    setSyncState(failed ? "failed" : "done");
+    setTimeout(() => setSyncState("idle"), 2400);
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -56,11 +82,11 @@ export function CalendarFeeds({
           {feeds.map((f) => {
             const member = f.member_id ? members.find((m) => m.id === f.member_id) : null;
             return (
-              <li key={f.id} className="border-line flex items-center gap-3 rounded-xl border p-3">
+              <li key={f.id} className="border-line bg-surface-raised flex items-center gap-3 rounded-2xl border p-3 shadow-sm">
                 <Avatar member={member ?? null} size="sm" />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium">{f.name}</p>
-                  <p className="text-faint truncate text-[11px]">
+                  <p className="text-faint truncate text-[11px] leading-relaxed">
                     {f.last_error
                       ? `Failed: ${f.last_error}`
                       : f.last_synced_at
@@ -105,12 +131,12 @@ export function CalendarFeeds({
         </p>
       )}
 
-      <div className="bg-sunk mb-4 inline-flex rounded-xl p-1">
+      <div className="bg-sunk mb-4 flex w-full rounded-xl p-1 sm:inline-flex sm:w-auto">
         {(["url", "paste"] as const).map((m) => (
           <button
             key={m}
             onClick={() => setMode(m)}
-            className={`rounded-lg px-3 py-1.5 text-xs font-medium ${
+            className={`flex-1 rounded-lg px-3 py-2 text-xs font-semibold transition-colors sm:flex-none ${
               mode === m ? "bg-surface text-ink shadow-sm" : "text-muted"
             }`}
           >
@@ -134,7 +160,7 @@ export function CalendarFeeds({
           </select>
         </Field>
 
-        <Field label="Label" hint="Optional — defaults to the person's name.">
+        <Field label="Label" hint="Optional. Defaults to the person's name.">
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -158,7 +184,7 @@ export function CalendarFeeds({
         ) : (
           <Field
             label="Paste the file contents"
-            hint="Open the .ics file in a text editor and paste everything. This is a one-off import — it won't refresh by itself."
+            hint="Open the .ics file in a text editor and paste everything. This is a one-off import and will not refresh by itself."
           >
             <textarea
               value={ics}
@@ -171,15 +197,26 @@ export function CalendarFeeds({
         )}
 
         <div className="flex items-center justify-between gap-2 pt-2">
+          {/*
+           * The glyph is the status: it spins while the run is in flight, pops
+           * into a tick when it lands, and shakes on a failure beside the error
+           * the hook already surfaces. Three states in one character, next to
+           * the words that say what it is doing.
+           */}
           <button
             type="button"
-            onClick={async () => {
-              await syncAll();
-              onSynced();
-            }}
+            onClick={() => void runSyncAll()}
             disabled={syncing || feeds.every((f) => !f.has_url)}
-            className="text-muted hover:text-ink text-xs disabled:opacity-40"
+            className="text-muted hover:text-ink inline-flex items-center gap-1.5 text-xs disabled:opacity-40"
           >
+            <span
+              className={
+                syncing ? "spin" : syncState === "done" ? "pop-in" : syncState === "failed" ? "shake" : ""
+              }
+              aria-hidden
+            >
+              {syncing ? "↻" : syncState === "done" ? "✓" : syncState === "failed" ? "↻" : "↻"}
+            </span>
             Sync everything now
           </button>
           <div className="flex gap-2">

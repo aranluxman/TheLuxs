@@ -1,7 +1,11 @@
 # Family Dashboard
 
-Events, a shared calendar and a group chat for a five-person household —
-one page, three tabs, live on every device in the house.
+A shared calendar, a to-do board, a chore board, a shopping list, a photo wall
+and a group chat for a five-person household — one page, six tabs, live on
+every device in the house.
+
+The **photo wall sits on the home screen**, directly under the day's summary:
+pick photos or drop them onto the card and everyone sees them straight away.
 
 Built with **Next.js 16 (App Router, TypeScript)**, **Tailwind CSS v4**,
 **Supabase** (Postgres + Realtime) and deployed as a **static site on Cloudflare Pages**.
@@ -12,49 +16,75 @@ Built with **Next.js 16 (App Router, TypeScript)**, **Tailwind CSS v4**,
 
 | Tab | What it does |
 | --- | --- |
-| **Calendar** | An agenda of what is actually coming up, over the next 2 weeks, 4 weeks or 3 months. Posted events and everyone's schedule entries merge into one chronological list, grouped by day. Tabs across the top switch between *Everyone* and one person, so anyone can pull up just their own week. |
-| **Events** | The family activity board — movie night, the CNE, a trip downtown. Title, date/time, location, notes, and a per-person RSVP checklist (Going / Maybe / Can't). |
-| **Chat** | An iMessage-style group thread — grouped bubbles, day separators, timestamps, sender colours, and live delivery over Supabase Realtime. Photos, files and voice notes attach to messages; tap any message to react with 👍 ❤️ 😂; you can delete your own. |
+| **Calendar** | What is coming up, in either of two shapes — a **list** (an agenda over the next 2 weeks, 4 weeks or 3 months, grouped by day) or a **grid** (a real month or week calendar you can page through). Posted events and everyone's schedule entries merge into one view; tabs across the top switch between *Everyone* and one person. The **weather** sits at the top, and the **photo wall** under it. |
+| **To Do's** | One-off jobs: what needs doing, who it is for, **how long it takes** and when it needs to be **done by**. A task can name several people, and one that names anybody is shown only to those people and whoever wrote it. Anything can be edited after the fact. |
+| **Chores** | The house chore board and a weekly points race. Nothing is assigned: every job is open to whoever gets to it, and you record who did one by tapping their face on the card. Most chores are worth a point; mopping, vacuuming and the washrooms are worth two. The jobs that get done several times a day take **as many names as helped**. There is a leaderboard for the week and a **history** for who has done the most over the last month, three months or ever. |
+| **Shopping** | The shared list — add, tick off, clear what's done. |
+| **Settings** | The page colour, text size, which tab the dashboard opens on and how the calendar opens, what shows on the calendar page, the weather and its units, message notifications, your name, photo and colour, and your PIN. |
+| **Chat** | An iMessage-style thread — grouped bubbles, day separators, timestamps, sender colours, and live delivery over Supabase Realtime. A row of faces above the messages switches between *Everyone* and a one-to-one conversation with any one person, with a dot on whichever conversations have moved on without you. Photos, files and voice notes attach to messages; tap any message to react with 👍 ❤️ 😂; you can delete your own. |
 
 Every screen also carries a **profile photo** per person, and the Calendar tab
-opens with a quote of the day, the next thing on the family's calendar, and
-what each person says they're looking forward to.
+opens with the date, a quote of the day and the current weather.
 
-The whole app has a **light and dark theme** with a manual toggle in the header
-(the 🌙/☀️ button). The choice persists per device; shift-clicking the toggle
-hands control back to the operating system.
+The whole app ships **nine themes** — Clean Light, Warm Sand, Blossom, High
+Contrast, Midnight Dark, Graphite, Emerald Luxury, Navy Luxury and Plum Velvet
+— picked from the swatch button in the header, plus a *Match system* option.
+The choice persists per device.
 
-There is no login. You pick your face once and the device remembers you — see
-[Security model](#security-model) for what that means and how to tighten it.
+You pick your face and enter your **PIN**; the device remembers you afterwards,
+so it is asked for once per phone rather than every visit. Someone else's phone
+asks for it again.
+
+The PIN is bcrypt-hashed in a table the browser cannot read, checked by a
+server-side function, and throttled after five wrong tries. It stops a sibling
+opening the app as you. It is **not** a login — see
+[Security model](#security-model) for what still gets through and how to close
+it.
 
 ---
 
 ## Theming
 
 Every colour in the app resolves through a CSS variable declared in
-`globals.css` — `bg-surface` is `var(--color-surface)`, and so on. Dark mode
-redefines those variables under `:root[data-theme="dark"]`; no component
-carries a `dark:` override for colour.
+`globals.css` — `bg-surface` is `var(--color-surface)`, and so on. A theme is a
+block that redefines those variables; no component carries a `dark:` override
+for colour, and adding a fifth palette is one CSS block plus one entry in
+`src/lib/themes.ts`.
 
-Three states, not two:
-
-| `data-theme` | Behaviour |
+| Theme | Reads as |
 | --- | --- |
-| absent | Follow the OS (`prefers-color-scheme`) |
-| `light` | Pinned light, even on a dark OS |
-| `dark` | Pinned dark, even on a light OS |
+| **Clean Light** | Soft white, near-black type, hairline grey borders, deep bronze accent |
+| **Midnight Dark** | Deep charcoal with an antique-gold accent |
+| **Emerald Luxury** | Dark forest green with a jade highlight |
+| **Navy Luxury** | Midnight navy with a cool steel-blue accent |
 
-The choice lives in `localStorage` under `family-dashboard:theme`, and a small
-blocking script in `layout.tsx` applies it **before first paint** — without it
-the page renders light and snaps to dark on hydration, which is exactly the
-flash you notice on a kitchen tablet at night. `ThemeProvider` reads both the
-stored choice and the OS preference through `useSyncExternalStore`, so the
-`storage` event keeps two open tabs in step for free.
+Two attributes drive it, both stamped on `<html>`:
 
-Two tokens exist purely to keep dark mode free of per-component patches:
-`--color-on-ink` (text sitting on an ink-filled button or your own chat bubble)
-and `--color-danger` / `--color-danger-soft` (destructive affordances, which
-would otherwise hardcode Tailwind's `red-50`/`red-800` and glare in the dark).
+| Attribute | Values | What reads it |
+| --- | --- | --- |
+| `data-theme` | `light` `midnight` `emerald` `navy` | The palette blocks in `globals.css` |
+| `data-mode` | `light` `dark` | `color-scheme`, and the `dark:` variant |
+
+`data-mode` is redundant with the theme id and deliberately so: native widgets
+and the `dark:` variant both need to know whether a palette is dark *without*
+enumerating which ids are, so a new theme never has to be added to a list.
+
+The choice lives in `localStorage` under `family-dashboard:theme`; removing the
+key means "follow the OS", which resolves to Clean Light or Midnight. A small
+blocking script in `layout.tsx` resolves all of that and stamps both attributes
+**before first paint** — without it the page renders light and snaps to dark on
+hydration, which is exactly the flash you notice on a kitchen tablet at night.
+Resolving `prefers-color-scheme` there rather than in CSS is what keeps
+`globals.css` to one block per palette instead of one per palette per scheme.
+`ThemeProvider` reads both the stored choice and the OS preference through
+`useSyncExternalStore`, so the `storage` event keeps two open tabs in step for
+free.
+
+Two tokens exist purely to keep the dark palettes free of per-component
+patches: `--color-on-ink` (text sitting on an ink-filled button or your own
+chat bubble) and `--color-danger` / `--color-danger-soft` (destructive
+affordances, which would otherwise hardcode Tailwind's `red-50`/`red-800` and
+glare in the dark).
 
 ---
 
@@ -91,6 +121,24 @@ mark. Changing that one means editing
 [`scripts/generate-app-icons.mjs`](scripts/generate-app-icons.mjs), re-running
 it, and redeploying — the defaults in `public/icons/` are generated by that
 script, in pure Node, so there is no image toolchain to install.
+
+#### The default mark
+
+The house-with-a-heart is **vector** everywhere a person actually looks at it:
+[`src/app/icon.svg`](src/app/icon.svg) for the browser tab, and
+[`src/components/BrandMark.tsx`](src/components/BrandMark.tsx) for the header and
+the App icon dialog's preview. That is what keeps it sharp at any zoom or pixel
+ratio. The PNGs remain for the three jobs that cannot take an SVG — the Android
+launcher, the iOS home screen and the maskable icon.
+
+There is no `favicon.ico`. There used to be, and it was the stock Next.js one:
+the App Router serves `src/app/favicon.ico` at `/favicon.ico`, which outranks
+`metadata.icons`, so the tab showed a 16×16 default rather than this app's mark
+at all. Deleting it is the fix; adding one back would just resume the fight.
+
+`GEOMETRY` in the icon script is the single source of truth for all three
+copies. Change a coordinate there and port it to the SVG and the component in
+the same commit — the failure mode is drift, and drift is silent.
 
 The setting lives in `family_settings`, so the icon is the household's, not the
 device's. Until [`0005_app_settings.sql`](supabase/migrations/0005_app_settings.sql)
@@ -157,6 +205,52 @@ change to every other device; the table has `REPLICA IDENTITY FULL` so a
 `DELETE` payload arrives with enough of the old row to know which pill to
 remove.
 
+### Direct messages
+
+The faces above the thread pick who you are talking to: **Everyone**, or one
+person. You are not in your own list — a message to yourself is rejected by a
+`CHECK` constraint, and means nothing anyway.
+
+**Read [Security model](#security-model) before you trust this with anything.**
+The short version: a DM is private from your family in normal use and private
+from nobody else. There is no login, so the filtering is a query the app asks
+for, not a rule the database enforces.
+
+A message is a row in `family_messages` with a `recipient_id` — `null` for the
+group thread, which is why every message that existed before this feature is
+still a group message and nothing had to be migrated. Alongside it,
+`conversation_key` is a **generated** column holding the two member ids sorted
+and joined, so both directions of a conversation produce the same value and
+reading a thread is one indexed equality test rather than a four-way `OR` that
+no index can serve. It is generated rather than written by the client so the two
+can never disagree; `src/lib/types.ts` mirrors the sort rule for the query side,
+and the two are checked against each other rather than assumed to match.
+
+The sort compares `uuid`, not `uuid::text`. Sorting the text form would order by
+the database's collation, and a collation that treats the hyphens in a UUID as
+punctuation need not agree with the browser's plain string compare — disagree
+once and a conversation silently reads as empty.
+
+One Realtime subscription serves every thread, and the client keeps the rows it
+is part of. Subscribing per conversation would rebind the socket on every tap,
+and `postgres_changes` filters have no `is null`, so the group thread could not
+be expressed at all. Holding every row is also what makes the unread dots
+possible without a query per conversation. The routing is on `recipient_id`, not
+`conversation_key`: generated columns are not emitted to logical replication
+before Postgres 18, so that column arrives empty over the socket even though the
+REST reads have it.
+
+**Unread dots** live in `localStorage` under `family-dashboard:chat-read`, keyed
+by member inside one entry so a shared tablet does not hand the next person the
+previous person's read state. They store the newest message's `created_at`
+rather than a clock reading — a tablet running a minute fast would otherwise
+mark threads read before their messages arrived. Being per device, a dot you
+clear on the tablet is still lit on your phone. That is a real limitation of
+having nowhere trustworthy to put it, not a bug.
+
+Threads are cached per conversation, so switching back to one is instant and
+issues no query, and history you had scrolled back into is still there.
+
 ### Combining everyone's calendars
 
 **Calendar → Feeds** subscribes each person's calendar so they all overlay on
@@ -193,6 +287,223 @@ To deploy the function after changing it:
 npx supabase functions deploy family-sync-ical --project-ref <your-ref>
 ```
 
+### The To Do's board
+
+The chore board answers "what needs doing around the house, every week". This
+answers the other half: one-off jobs, with names on them, a day they need to be
+done by and — since the house asked — **how long they are expected to take**.
+
+Four things you can say about a task, all of them editable afterwards from the
+pencil on the row:
+
+| Field | What it means |
+| --- | --- |
+| Title | What needs doing |
+| Who it's for | Any number of people. Nobody picked means the whole house. |
+| How long it takes | Minutes. Five presets and a box; the open list totals them up, so the board can say what the evening costs. |
+| Done by | A calendar day, not a timestamp |
+
+**A task that names people is shown only to those people and whoever wrote
+it.** Read the next paragraph before treating that as privacy: it is the same
+courtesy the direct messages are. The SELECT policy is `using (true)` because
+there is no login, every browser is still sent every row, and the filter is a
+question the client asks rather than a rule the database enforces. See
+[Security model](#security-model).
+
+`assignee_ids` is a `uuid[]` rather than a junction table. The textbook shape
+would be a second table, and it would also mean a second query, a second
+realtime subscription and a join on every read of a board that never holds more
+than a few dozen rows. The array is the whole feature in one column that
+Realtime already carries. No foreign key is possible on an array element, so a
+member who leaves the house leaves their id behind; the client resolves ids
+through the member map and drops the ones it cannot find, exactly as a chore
+tick does.
+
+`due_on` is a `date`. A task is due on a day, not at an instant — storing a
+timestamp would push it across midnight for anyone in a different timezone and
+make "is this overdue" a question about clocks rather than calendars.
+
+Ticking does not delete. `done_at` is the whole state machine, so unticking is
+free and a finished list is a record of the week rather than an empty screen.
+
+### The chore board
+
+Eight jobs, and none of them belong to anybody:
+
+| Chore | How often | Worth | Several people? |
+| --- | --- | --- | --- |
+| Sweeping | Every day | 1 | yes |
+| Wiping the table | Every day | 1 | yes |
+| Loading the dishwasher | Every day | 1 | yes |
+| Washing the dishes | Every day | 1 | yes |
+| Unloading the dishwasher | Every day | 1 | no |
+| Mopping | Weekends | 2 | no |
+| Vacuuming | Weekends | 2 | no |
+| Cleaning the washrooms | Weekends | 2 | no |
+
+**41 points are on the table each week** — five daily chores across seven days,
+plus three weekend jobs at two points each. You claim a chore by tapping your
+own face on the card; every member's name is on every card, and tapping your
+own face again takes it back off.
+
+Two things follow from the table above. **Not every chore is worth the same**:
+mopping the floors is not wiping the table, and a board that scored them
+equally quietly rewarded whoever got to the quick ones first. And **the jobs
+done several times a day take several names** — the dishes get washed after
+breakfast, after lunch and after dinner, rarely by the same person, and each of
+them earns the points. On a single-owner chore, tapping a different face still
+hands the whole thing over.
+
+A chore's worth is stamped onto the tick when it happens rather than looked up
+when the board paints, so re-pricing the roster next year does not re-score
+last March.
+
+**History** lives at the bottom of the tab, behind a button: every tick ever
+recorded, newest first, and a table of who has done the most over the last 30
+days, 3 months or all time — by number of chores first, points second.
+
+That "nothing is assigned" is the design, not a shortcut. A fixed roster and a
+points race are different products: if the sweeping is always Sahana's, her
+point is a foregone conclusion and the score records nothing. Unassigned, the
+leaderboard is the only account of who actually did the work — which is the
+whole reason the tab exists.
+
+The list itself lives in code, in [`src/lib/chores.ts`](src/lib/chores.ts),
+because it changes about once a year and by conversation — including which
+chores allow more than one name, which is a product decision rather than a
+constraint. What the database holds is the *tick*: one row per (chore, period,
+person) saying it got done, who did it and what it was worth. There is nothing to generate ahead of time, nothing to backfill when the
+list changes, and no period a chore can be missing from — an absent row is
+simply "not done yet".
+
+`period_key` is a local day (`2026-08-24`) for a daily chore and an ISO week
+(`2026-W35`) for a weekend one, which is what makes the board reset itself at
+midnight and on Monday morning without a scheduler, and what makes a daily
+chore worth its value seven times over and a weekend one worth it once. It is
+computed on the client, because the client is the only party that knows the
+household's timezone; a server-side `now()` would file a Sunday-evening sweep
+under Monday for anyone west of UTC.
+
+The tab loads eight period keys at once — the seven days of the current week
+plus the week itself — because a daily chore's ticks are filed one per day, so
+Monday's sweep and Friday's sweep are separate rows and a week's score cannot
+be read without naming all seven.
+
+**Ranking** is standard competition ranking: equal scores share a place and the
+next distinct score skips the numbers they used up, so two people on two points
+are both 2nd and the next is 4th. Nobody is crowned on nil — a leader only
+appears once somebody has actually done something — and a tie at the top lists
+everyone involved.
+
+Anyone can reopen anyone's chore. On a shared board the alternative is chasing
+whoever is out of the house to undo their own mis-tap.
+
+### Settings
+
+One narrow column of small blocks, because everything in it is a thing you
+change once and forget:
+
+| Block | What it holds | Where it lives |
+| --- | --- | --- |
+| **Page colour** | The nine palettes plus *Match system* | `localStorage` |
+| **Layout** | Which tab the dashboard opens on; standard or wide content; text size; whether the calendar opens as a list or a grid | `localStorage` |
+| **On the calendar page** | Whether the quote of the day and the photo wall are shown | `localStorage` |
+| **Weather** | On or off, °C/km or °F/mi, and where it reports from | `localStorage` |
+| **Notifications** | A banner when somebody messages you, and whether it makes a sound | `localStorage` + browser permission |
+| **You** | Your name, photo and colour | Postgres |
+| **Your PIN** | Change it; forget this device | Postgres |
+
+The split is deliberate. Theme and layout describe *the screen you are holding*
+— the kitchen tablet wants the wide layout and to open on the calendar, a phone
+in a pocket wants neither — so syncing them across devices would make the
+setting worse. Name, photo, colour and PIN describe *you*, and the rest of the
+household sees them.
+
+"Opens on" is read once, as the initial tab, rather than tracked. Otherwise
+changing it in Settings would yank the tab out from under whoever is changing
+it; it takes effect on the next visit, which is what the words mean.
+
+Text size is applied as a root `font-size`, because every measurement in the
+app is in `rem` — one number moves the whole interface, including the things
+nobody would remember to add a class to.
+
+**A forgotten PIN cannot be reset from this screen, by design.** Changing one
+requires the current PIN, and clearing one outright is `family_admin_clear_pin`,
+which migration 0006 deliberately never granted to the browser. A self-serve
+reset would let anyone holding the tablet clear anyone else's PIN, which is
+precisely what the PIN exists to stop.
+
+The screen itself no longer says any of that. It shows two buttons — **Change
+PIN** and **Forget this device** — and nothing more: the paragraph that used to
+sit under them printed the recovery statement on the lock, which told every
+reader that a way in exists and what it is called. Whoever runs the database
+knows where it is; it is documented here instead.
+
+### The photo wall
+
+Under the agenda on the home screen. Pick photos from the camera roll, take one
+with **Camera**, or drop them onto the card; each is downscaled in the browser
+to 1600px on its longest edge before upload, so a phone album's worth of 4MB
+originals does not become 4MB down the wire every time the home screen paints.
+
+There is no caption box. There was, and it was a field nobody filled in
+standing between "I have a photo" and the photo being on the wall. Captions
+already on existing photos are still shown wherever they appear — the column
+stays, only the input is gone.
+
+The objects live under `photos/` in the same private `family-media` bucket as
+avatars and chat attachments, so every tile is a signed URL that expires — and,
+as in the chat, they are re-signed on a 7-hour cycle because the kitchen tablet
+is never reloaded. `family_photos.storage_path` is constrained to the `photos/`
+prefix, which is what stops a row here being aimed at somebody's avatar and
+used to delete it.
+
+Taking a photo down removes the row first and the object second: an object
+removed while a row still pointed at it would render as a permanently broken
+tile on every other device, whereas an orphaned object is invisible.
+
+### The weather
+
+One card at the top of the Calendar tab: what it is doing now, what it feels
+like, and a four-day strip. It comes from [Open-Meteo](https://open-meteo.com),
+which was chosen for one reason — it needs no API key. Everything else in this
+app is either Supabase or the browser, and a weather panel is not worth
+shipping a secret inside a static site to make it work.
+
+The forecast re-reads itself every fifteen minutes, because this dashboard
+lives on a kitchen tablet that is never reloaded, and the last answer is cached
+in `localStorage` so the card is never a spinner on a device that was showing
+it a minute ago. A failure is a small line of text, not a blank page: the
+house's wifi going out should not take the calendar with it.
+
+Where it reports from is a coordinate, not a place name — resolving a name
+would mean a geocoding service, which is a second thing to be down and a second
+thing to explain. It defaults to home, and *Use my location* asks the browser,
+rounded to three decimals (about 100m, far finer than a forecast grid and not a
+precise home address).
+
+### Message notifications
+
+A banner when somebody messages you or the group, and a sound if you want one.
+Both are per device, both are off until asked for, and the browser's own
+permission prompt is the gate — a setting that claims to be on while the
+browser has it blocked would be a lie the screen tells about itself, so the
+block says which of the two is refusing.
+
+The subscription lives in the shell rather than in the chat tab, which is the
+whole point: the chat's own subscription only exists while the chat is on
+screen, and the message worth being told about is by definition one that
+arrived while you were looking at something else.
+
+A **dot on the Chat tab** appears either way. Permission can be denied, a
+browser can lack notifications entirely, and the household should still be able
+to see that the conversation has moved.
+
+Direct messages are filtered exactly as the chat filters them — every browser
+is sent every row, because there is no login, and the ones that are not yours
+are dropped as a courtesy rather than as a boundary. A notification for someone
+else's DM would make that leak loud as well as visible.
+
 ### Housekeeping
 
 Storage now cleans up after itself: deleting a message removes its object from
@@ -217,31 +528,68 @@ Then run, in order:
 
 - `supabase/migrations/0002_media_quotes_ical.sql` — profile photos, chat
   attachments, quotes and calendar feeds.
-- `supabase/migrations/0003_reactions_and_chores_removal.sql` — message
-  reactions, the missing indexes, and the removal of the chores feature.
-- `supabase/migrations/0004_rls_hardening.sql` — per-command policies, column
-  grants and the triggers that make messages append-only. Read its header
-  before trusting it: it is honest about what an app with no login can enforce.
-- `supabase/migrations/0005_app_settings.sql` — `family_settings`, which is
+- `supabase/migrations/0003_family_message_reactions.sql` — message reactions
+  and the missing indexes. **The chat needs this one**; without it every
+  reaction fails with *Could not find the table
+  'public.family_message_reactions' in the schema cache*.
+- `supabase/migrations/0004_remove_chores.sql` — removes the retired chores
+  feature. Optional and destructive; see the note below.
+- `supabase/migrations/0005_rls_hardening.sql` — privileges, guard triggers and
+  per-command policies.
+- `supabase/migrations/0006_profile_pins.sql` — per-profile PINs and remembered
+  devices.
+- `supabase/migrations/0007_shopping_list.sql` — the shared shopping list.
+- `supabase/migrations/0008_chore_board.sql` — the chore board. **The Chores
+  tab needs this one**; without it every tick fails with *Could not find the
+  table 'public.family_chore_ticks' in the schema cache*.
+- `supabase/migrations/0009_family_photos.sql` — the photo wall on the home
+  screen. **The Calendar tab's photo strip needs this one.**
+- `supabase/migrations/0010_chore_reassignment.sql` — lets a chore change
+  hands. **The Chores tab needs this one too**; without it, tapping a second
+  person on a card that is already ticked fails instead of moving the point.
+- `supabase/migrations/0011_app_settings.sql` — `family_settings`, which is
   what makes the app icon the household's rather than one device's.
+- `supabase/migrations/0012_direct_messages.sql` — direct messages:
+  `recipient_id`, the generated `conversation_key` and its indexes, and the
+  constraints that stop a message being addressed to its own sender or moved
+  between conversations after the fact. **One-to-one chat needs this one.**
+  Read its header before trusting it: it is honest that this adds a feature,
+  not privacy.
+- `supabase/migrations/0013_chore_tick_upsert_grant.sql` — the column grants
+  the chore board's upsert needed. Superseded in practice by `0016`, which
+  stops upserting altogether, but harmless to run in order.
+- `supabase/migrations/0014_todos.sql` — the To Do's board. **The To Do's tab
+  needs this one**; without it every task fails with *Could not find the table
+  'public.family_todos' in the schema cache*.
+- `supabase/migrations/0015_todos_detail.sql` — several people per task, how
+  long it takes, and the column grants that let a task be edited after the
+  fact. **The To Do's tab needs this one too**; it replaces `assigned_to` with
+  `assignee_ids`, backfilling it first.
+- `supabase/migrations/0016_chore_signups_points.sql` — several people per
+  chore, and chores worth more than one point. **The Chores tab needs this
+  one**; it swaps the composite primary key for a surrogate `id`, which is what
+  makes more than one sign-up per chore per period possible. Existing ticks
+  carry over untouched and score the 1 point they were worth.
 
-All five are idempotent — safe to re-run. Together they leave you with:
+All of them are idempotent — safe to re-run. `0001`–`0003` leave you with:
 
 - `family_members`, `family_events`, `family_event_rsvps`,
   `family_calendar_entries`, `family_messages`, `family_message_reactions`,
   `family_quotes`, `family_looking_forward`, `family_calendar_feeds`,
-  `family_settings`
+  `family_settings` — `family_messages` carrying `recipient_id` and the
+  generated `conversation_key` that make one-to-one threads possible
 - RLS policies on all ten tables
 - Realtime on `family_messages` and `family_message_reactions`
 - the private `family-media` storage bucket and its policy
 - 28 seeded quotes
 
-> **Upgrading an existing install.** `0003` **drops** `family_chores`,
+> **Upgrading an existing install.** `0004` **drops** `family_chores`,
 > `family_chore_templates`, `family_chore_exclusions`, the
 > `family_generate_chores()` / `family_regenerate_future_chores()` /
 > `family_set_chore_done()` functions and the `family_recurrence` enum. That
 > deletes your chore history for good. Take a backup first if you want to keep
-> the record of who did what.
+> the record of who did what — nothing in the app reads those tables any more,
+> so leaving `0004` unrun costs you only the disk they sit on.
 
 > **Table naming.** Every object is prefixed `family_` because this Supabase
 > project is shared with other apps that follow the same convention
@@ -363,6 +711,21 @@ recordings and the app icon. The storage bucket is private and served through
 signed URLs, which stops the objects being enumerable, but it does not stop
 someone holding the key from asking for a signed URL themselves.
 
+**Direct messages are private from your family, not from an attacker.** A DM is
+an ordinary row in `family_messages` with a `recipient_id`, and the SELECT
+policy is still `using (true)` — with no login there is no identity for Postgres
+to check a recipient against. The app asks for one conversation at a time and
+has no screen that would show you somebody else's, so in ordinary use a DM stays
+between two people. Anyone who opens devtools, or who has the site URL and the
+publishable key, can read every direct message in the house. Two consequences
+worth stating outright: Supabase Realtime broadcasts every new message to every
+connected browser, which then keeps only the ones it is part of — in JavaScript,
+as a courtesy, not as a boundary; and reactions are stored against a message id
+with no recipient of their own, so *that someone reacted to a DM* is visible even
+though its text is not. The real fix is the same one this whole section is about:
+add auth, then make the read policy
+`using (recipient_id is null or sender_id = auth.uid() or recipient_id = auth.uid())`.
+
 It also bounds what "delete your own messages" can mean. The client sends
 `.eq("sender_id", me)`, and `me` is whichever profile the device picked — so
 the rule is honest about *accidents*, not about *adversaries*. Anyone holding
@@ -383,7 +746,9 @@ To lock it down later:
 1. Turn on an auth provider in Supabase (email magic links are enough).
 2. Add `user_id uuid references auth.users` to `family_members`.
 3. Replace `using (true) with check (true)` in the migration's policy loop with a
-   real predicate, e.g. `auth.uid() is not null`.
+   real predicate, e.g. `auth.uid() is not null` — and on `family_messages`,
+   the recipient-aware predicate above, which is what finally makes a direct
+   message actually direct.
 4. Wrap the app in a sign-in gate and map the signed-in user to their member row.
 
 Nothing else in the app has to change — the data layer is already keyed on
@@ -397,6 +762,7 @@ Nothing else in the app has to change — the data layer is already keyed on
 src/
   app/
     layout.tsx            root layout, fonts, theme colour, boot script
+    icon.svg              the browser tab's mark — vector, so it never blurs
     manifest.ts           web app manifest — what makes it installable
     page.tsx              renders <App/>
     globals.css           Tailwind v4 theme tokens
@@ -406,45 +772,54 @@ src/
     SetupScreen.tsx       first-run: name the household
     ProfileGate.tsx       "Who's using this?"
     Shell.tsx             header, desktop tabs, mobile bottom bar
+    BrandMark.tsx         the house-and-heart mark as inline SVG
     AppIconProvider.tsx   the household's icon: load, upload, apply to <head>
     AppIconSheet.tsx      "App icon" — upload or remove the family photo
     InstallButton.tsx     "Download app", plus the iOS explanation
     ServiceWorkerRegistrar.tsx
-    ThemeProvider.tsx     light/dark/system preference, persisted
-    ThemeToggle.tsx       the 🌙/☀️ header button
-    CalendarTab.tsx       upcoming agenda + per-person tabs
-    EventsTab.tsx
-    ChatTab.tsx           bubbles, attachments, reactions, delete
+    ThemeProvider.tsx     which palette is active, persisted
+    ThemePicker.tsx       the header swatch button and its menu
+    CalendarTab.tsx       upcoming agenda + per-person tabs + photo wall
+    ChoresTab.tsx         leaderboard + chore cards, grouped by cadence
+    PhotoWall.tsx         the home-screen photo strip and its lightbox
+    ShoppingTab.tsx
+    SettingsTab.tsx       theme, layout, your profile, your PIN
+    ChatTab.tsx           conversation switcher, bubbles, attachments, reactions
     CalendarFeeds.tsx     subscribe/import iCal feeds
     TodayCard.tsx         quote + next event + "looking forward to"
     ui.tsx                Avatar, Button, Card, Modal, Field, EmptyState…
   hooks/
     useInstallPrompt.ts   installability as a store, not mirrored state
-    useMessages.ts        history + Realtime + attachment lifecycle
+    useMessages.ts        per-conversation history, Realtime, attachment lifecycle
     useReactions.ts       reaction rows + Realtime + optimistic toggle
-    useEvents.ts          events + RSVPs
+    useEvents.ts          events + RSVPs (read-only; feeds the agenda)
+    usePrefs.ts           per-device layout choices, persisted
     useCalendarEntries.ts
     useCalendarFeeds.ts   feed CRUD + useCalendarAutoSync polling
+    useChores.ts          a week of ticks, the scores and Realtime
+    usePhotos.ts          photo rows, signed URLs, upload and removal
+    useShopping.ts
+    useProfileLock.ts     PIN status, unlock, remembered devices
   lib/
     supabase.ts           lazily-created client, config guard
     types.ts              row types, REACTION_EMOJI, the AgendaItem union
     dates.ts              local-time helpers (Monday-first, ISO weeks)
+    themes.ts             the four palettes, their swatches and modes
+    prefs.ts              start tab and content width
+    chores.ts             the chore list, cadences and the weekly points cap
     palette.ts            member colours, categories, tint()
     storage.ts            upload / sign / remove in the private bucket
+    chatRead.ts           per-conversation read marks, for the unread dots
     image.ts              downscale for avatars, square-crop for the icon
     appIcon.ts            the icon cache and the <link rel="icon"> juggling
 public/
-  icons/                  default marks, 192 / 512 / maskable / apple-touch
+  icons/                  raster marks: 192 / 256 / 512 / maskable / apple-touch
   sw.js                   network-first service worker
 scripts/
-  generate-app-icons.mjs  redraws public/icons in pure Node
+  generate-app-icons.mjs  redraws public/icons in pure Node; owns GEOMETRY
 supabase/
   migrations/
-    0001_family_dashboard.sql
-    0002_media_quotes_ical.sql
-    0003_reactions_and_chores_removal.sql
-    0004_rls_hardening.sql
-    0005_app_settings.sql
+    0001_family_dashboard.sql … 0012_direct_messages.sql
   functions/family-sync-ical/
 ```
 

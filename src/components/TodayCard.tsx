@@ -1,176 +1,187 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
+import { useChores } from "@/hooks/useChores";
 import { useDailyExtras } from "@/hooks/useDailyExtras";
-import { useEvents } from "@/hooks/useEvents";
-import { formatDayLabel, formatTime, parseISO } from "@/lib/dates";
-import { tint } from "@/lib/palette";
+import { usePrefs } from "@/hooks/usePrefs";
+import { useTodos } from "@/hooks/useTodos";
+import { addDays, dayKey, format, formatTime, todayKey } from "@/lib/dates";
+import { todoVisibleTo, type AgendaItem } from "@/lib/types";
 import { useFamily } from "./FamilyProvider";
-import { Avatar, Card, inputClass } from "./ui";
+import { CountUp } from "./motion/CountUp";
+import { Marquee } from "./motion/Marquee";
+import { Reveal } from "./motion/Reveal";
+import { Card } from "./ui";
 
-function daysUntil(date: Date): number {
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
-  const target = new Date(date);
-  target.setHours(0, 0, 0, 0);
-  return Math.round((target.getTime() - start.getTime()) / 86_400_000);
-}
+/**
+ * The strip at the top of the Calendar tab: the day, who is holding the phone,
+ * what is left to do, and what is coming next.
+ *
+ * It used to carry two more panels — the next thing on the family calendar, and
+ * a note per person about what they were looking forward to. Both are gone at
+ * the household's request. The `family_looking_forward` rows are left in the
+ * database rather than dropped: nothing reads them now, but deleting three
+ * people's notes to remove a panel is not a trade this change gets to make.
+ */
 
-function countdownLabel(days: number): string {
-  if (days <= 0) return "today";
-  if (days === 1) return "tomorrow";
-  if (days < 7) return `in ${days} days`;
-  if (days < 14) return "next week";
-  return `in ${Math.round(days / 7)} weeks`;
+/** Which part of the day it is, for the greeting. */
+function partOfDay(d = new Date()): "morning" | "afternoon" | "evening" {
+  const h = d.getHours();
+  if (h < 12) return "morning";
+  if (h < 18) return "afternoon";
+  return "evening";
 }
 
 /**
- * The strip at the top of the Calendar tab: a shared quote for the day, the
- * next thing on the family's calendar, and what each person is looking
- * forward to.
+ * The greeting, re-checked every minute.
+ *
+ * A minute is plenty: the only thing that can change is which of three words is
+ * shown, and it changes twice a day. The alternative — computing it once at
+ * mount — leaves the kitchen tablet saying "Good morning" at nine at night,
+ * which is precisely the tablet this app was built for.
  */
-export function TodayCard() {
-  const { members, currentMember } = useFamily();
-  const { quoteOfTheDay, noteFor, setLookingForward } = useDailyExtras();
-  const { events } = useEvents();
+function useGreeting(): "morning" | "afternoon" | "evening" {
+  const [part, setPart] = useState(partOfDay);
 
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState("");
+  useEffect(() => {
+    const id = setInterval(() => {
+      const next = partOfDay();
+      setPart((prev) => (prev === next ? prev : next));
+    }, 60_000);
+    return () => clearInterval(id);
+  }, []);
 
-  // Pinned once per mount: reading the clock during render is impure, and the
-  // "next" event should not flip mid-session.
-  const [now] = useState(() => Date.now());
+  return part;
+}
 
-  const nextEvent = useMemo(() => {
-    return (
-      events
-        .map((e) => ({ event: e, at: parseISO(e.event_date) }))
-        .filter((x) => x.at.getTime() >= now)
-        .sort((a, b) => a.at.getTime() - b.at.getTime())[0] ?? null
-    );
-  }, [events, now]);
+/** One number and its label. The number counts itself in; the label does not. */
+function Stat({
+  value,
+  label,
+  live,
+}: {
+  value: number;
+  label: string;
+  /** Draws the pulsing dot — only ever for something genuinely new. */
+  live?: boolean;
+}) {
+  return (
+    <span className="flex items-center gap-2">
+      {live ? <span className="live-dot" aria-hidden /> : null}
+      <span>
+        <CountUp value={value} className="text-ink block text-xl leading-none font-bold" />
+        <span className="text-faint mt-0.5 block text-[11px] font-medium">{label}</span>
+      </span>
+    </span>
+  );
+}
 
-  const mine = currentMember ? noteFor(currentMember.id) : null;
-  const others = members.filter((m) => m.id !== currentMember?.id && noteFor(m.id));
+export function TodayCard({
+  agenda,
+  unreadCount = 0,
+}: {
+  /** Everything on the shared calendar, already merged by the tab above. */
+  agenda: AgendaItem[];
+  /** Messages that have arrived since the chat was last open, on this device. */
+  unreadCount?: number;
+}) {
+  const { prefs } = usePrefs();
+  const { currentMember } = useFamily();
+  const { quoteOfTheDay } = useDailyExtras(prefs.showQuote);
+  const part = useGreeting();
 
-  async function save() {
-    if (!currentMember) return;
-    await setLookingForward(currentMember.id, draft, null);
-    setEditing(false);
-  }
+  // Both boards are already live on their own tabs; here they are read for one
+  // number each. Only one tab is mounted at a time, so this is one subscription
+  // apiece rather than a second copy of anything.
+  const { progress } = useChores();
+  const { todos } = useTodos();
+
+  const today = todayKey();
+  const tomorrow = dayKey(addDays(new Date(), 1));
+
+  const eventsToday = agenda.filter((i) => i.day === today);
+  const upNext = agenda
+    .filter((i) => i.day === today || i.day === tomorrow)
+    .slice(0, 8);
+
+  const openTodos = todos.filter(
+    (t) => !t.done_at && todoVisibleTo(t, currentMember?.id ?? null),
+  ).length;
+  const choresLeft = Math.max(0, progress.total - progress.done);
 
   return (
-    <Card className="overflow-hidden">
-      {quoteOfTheDay ? (
-        <div className="border-line border-b px-5 py-4">
+    <Card className="today-card">
+      <div className="relative z-[1] flex items-end justify-between gap-4 px-5 pt-5 pb-4 sm:px-6">
+        <div>
+          <p className="text-accent text-[11px] font-bold tracking-[0.14em] uppercase">Today</p>
+          <h2 className="mt-1 text-2xl font-bold tracking-tight sm:text-3xl">
+            {format(new Date(), "EEEE, MMMM d")}
+          </h2>
+          {/* Keyed on the part of the day, so noon and six o'clock re-run the
+              fade rather than swapping the word underneath the reader. */}
+          <p key={part} className="greeting-swap text-muted mt-1 text-sm">
+            Good {part}
+            {currentMember ? `, ${currentMember.name}` : ""}.
+          </p>
+        </div>
+        <span className="bg-surface/70 text-muted hidden rounded-full px-3 py-1.5 text-xs font-semibold shadow-sm sm:inline-flex">
+          Your family at a glance
+        </span>
+      </div>
+
+      {/* --------------------------------------------------------- the counts */}
+      <div
+        className="border-line relative z-[1] flex flex-wrap items-center gap-x-7 gap-y-3 border-t px-5 py-3.5 sm:px-6"
+        // Counts change under people as things sync. Announced politely so a
+        // screen reader mentions it at a pause rather than interrupting.
+        aria-live="polite"
+      >
+        <Stat value={eventsToday.length} label={eventsToday.length === 1 ? "event today" : "events today"} />
+        <Stat value={choresLeft} label={choresLeft === 1 ? "chore left" : "chores left"} />
+        <Stat value={openTodos} label={openTodos === 1 ? "task to do" : "tasks to do"} />
+        {unreadCount > 0 ? (
+          <Stat value={unreadCount} label="unread messages" live />
+        ) : null}
+      </div>
+
+      {/* --------------------------------------------------------- up next */}
+      {upNext.length > 0 ? (
+        <Reveal className="border-line relative z-[1] border-t">
+          <div className="flex items-center gap-2 px-5 py-2.5 sm:px-6">
+            <span className="text-faint shrink-0 text-[10px] font-bold tracking-[0.14em] uppercase">
+              Up next
+            </span>
+            <Marquee
+              className="min-w-0 flex-1 text-xs"
+              label="What is on today and tomorrow"
+              // Longer lists take proportionally longer, so the reading speed
+              // is the same whether there are two events or eight.
+              duration={Math.max(24, upNext.length * 7)}
+              items={upNext.map((i) => (
+                <span key={i.id} className="text-muted">
+                  <span className="text-ink font-semibold tabular-nums">
+                    {i.start ? formatTime(i.start) : "All day"}
+                  </span>
+                  <span className="text-faint"> · </span>
+                  {i.title}
+                  {i.day === tomorrow ? <span className="text-faint"> (tomorrow)</span> : null}
+                </span>
+              ))}
+            />
+          </div>
+        </Reveal>
+      ) : null}
+
+      {prefs.showQuote && quoteOfTheDay ? (
+        <div className="border-line relative z-[1] border-t px-5 py-4 pb-5 sm:px-6">
           <p className="text-ink text-[15px] leading-relaxed font-medium text-balance">
             &ldquo;{quoteOfTheDay.quote_text}&rdquo;
           </p>
           {quoteOfTheDay.author ? (
-            <p className="text-faint mt-1.5 text-xs">— {quoteOfTheDay.author}</p>
+            <p className="text-faint mt-1.5 text-xs">- {quoteOfTheDay.author}</p>
           ) : null}
         </div>
       ) : null}
-
-      <div className="grid gap-px sm:grid-cols-2">
-        {/* ------------------------------------------- next thing on the calendar */}
-        <div className="px-5 py-4">
-          <h3 className="text-muted mb-2 text-xs font-semibold tracking-[0.08em] uppercase">
-            To look forward to
-          </h3>
-          {nextEvent ? (
-            <div>
-              <p className="text-sm font-semibold">{nextEvent.event.title}</p>
-              <p className="text-muted mt-0.5 text-xs">
-                {formatDayLabel(nextEvent.at)} · {formatTime(nextEvent.at)}
-                {nextEvent.event.location ? ` · ${nextEvent.event.location}` : ""}
-              </p>
-              <p className="text-accent mt-1.5 text-xs font-semibold">
-                {countdownLabel(daysUntil(nextEvent.at))}
-              </p>
-            </div>
-          ) : (
-            <p className="text-faint text-xs">
-              Nothing on the board yet — plan something on the Events tab.
-            </p>
-          )}
-        </div>
-
-        {/* ---------------------------------------------- personal notes */}
-        <div className="border-line px-5 py-4 sm:border-l">
-          <h3 className="text-muted mb-2 text-xs font-semibold tracking-[0.08em] uppercase">
-            What you&rsquo;re excited about
-          </h3>
-
-          {editing ? (
-            <div className="space-y-2">
-              <input
-                autoFocus
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void save();
-                  if (e.key === "Escape") setEditing(false);
-                }}
-                maxLength={160}
-                placeholder="Seeing my friends on the weekend…"
-                className={inputClass}
-              />
-              <div className="flex gap-2">
-                <button
-                  onClick={save}
-                  className="bg-ink text-on-ink rounded-lg px-3 py-1.5 text-xs font-medium"
-                >
-                  Save
-                </button>
-                <button
-                  onClick={() => setEditing(false)}
-                  className="text-muted px-2 py-1.5 text-xs"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          ) : (
-            <button
-              onClick={() => {
-                setDraft(mine?.note ?? "");
-                setEditing(true);
-              }}
-              disabled={!currentMember}
-              className="text-left text-sm disabled:opacity-50"
-            >
-              {mine ? (
-                <span className="text-ink">{mine.note}</span>
-              ) : (
-                <span className="text-faint">Add something &rarr;</span>
-              )}
-            </button>
-          )}
-
-          {others.length > 0 ? (
-            <ul className="mt-3 space-y-1.5 border-t border-dashed pt-3">
-              {others.map((m) => {
-                const note = noteFor(m.id)!;
-                return (
-                  <li key={m.id} className="flex items-start gap-2 text-xs">
-                    <Avatar member={m} size="sm" />
-                    <span className="min-w-0 flex-1">
-                      <span
-                        className="rounded px-1 font-medium"
-                        style={{ backgroundColor: tint(m.color, 0.14), color: m.color }}
-                      >
-                        {m.name}
-                      </span>{" "}
-                      <span className="text-muted">{note.note}</span>
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          ) : null}
-        </div>
-      </div>
     </Card>
   );
 }

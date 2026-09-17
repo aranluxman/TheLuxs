@@ -64,16 +64,20 @@ export function SetupScreen() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-2xl px-5 py-12">
-      <h1 className="text-2xl font-semibold">Set up your family</h1>
-      <p className="text-muted mt-2 text-sm">
-        Add everyone in the house. Each person gets their own colour, which tags
-        their events across the calendar and chat.
-      </p>
+    <main className="mx-auto w-full max-w-2xl px-5 py-10 sm:py-16">
+      <div className="mb-8 max-w-lg">
+        <div className="brand-mark mb-5" aria-hidden>F</div>
+        <p className="text-accent text-[11px] font-bold tracking-[0.14em] uppercase">A shared space</p>
+        <h1 className="mt-2 text-3xl font-bold tracking-tight">Set up your family</h1>
+        <p className="text-muted mt-2 text-sm">
+          Add everyone in the house. Each person gets their own colour, which tags
+          their events across the calendar and chat.
+        </p>
+      </div>
 
-      <div className="mt-8 space-y-3">
+      <div className="space-y-3">
         {drafts.map((d, i) => (
-          <div key={i} className="border-line bg-surface flex items-center gap-3 rounded-2xl border p-3">
+          <div key={i} className="dashboard-card border-line bg-surface flex items-center gap-3 rounded-2xl border p-3">
             <select
               value={d.avatar_emoji}
               onChange={(e) => update(i, { avatar_emoji: e.target.value })}

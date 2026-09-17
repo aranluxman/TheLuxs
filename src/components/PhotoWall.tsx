@@ -1,0 +1,450 @@
+"use client";
+
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { usePhotos } from "@/hooks/usePhotos";
+import { format, parseISO } from "@/lib/dates";
+import type { PhotoWithUrl } from "@/lib/types";
+import { useFamily } from "./FamilyProvider";
+import { Avatar, Button, Card, ErrorNote, SectionTitle } from "./ui";
+
+/**
+ * The family photo wall, on the home screen.
+ *
+ * A strip of tiles rather than an album: it sits under the agenda, so it has
+ * to be glanceable at a walk-past and must not push the day's schedule off
+ * the fold. Tapping a tile opens it properly.
+ */
+
+/* -------------------------------------------------------------- lightbox */
+
+function Lightbox({
+  photo,
+  from,
+  onClose,
+  onDelete,
+}: {
+  photo: PhotoWithUrl;
+  /**
+   * Where the photo was on screen when it was tapped, in viewport coordinates.
+   *
+   * This is the F and the I of FLIP: the opened image is drawn at its final
+   * size, then immediately transformed *back* onto the thumbnail's box and
+   * released, so it appears to grow out of the photo that was tapped rather
+   * than fading in over it. Null when it was opened some other way (a keyboard
+   * activation with no rect to read), in which case it just scales up in place.
+   */
+  from: DOMRect | null;
+  onClose: () => void;
+  onDelete: () => void;
+}) {
+  const { byId } = useFamily();
+  const uploader = photo.uploaded_by ? byId[photo.uploaded_by] : null;
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
+
+  /*
+   * The invert-and-play half. Runs in a layout effect so the transform is in
+   * place before the browser paints — a frame of the full-size image at full
+   * size is exactly the jump this exists to avoid.
+   */
+  useLayoutEffect(() => {
+    const el = imgRef.current;
+    if (!el || !from) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+    const to = el.getBoundingClientRect();
+    if (!to.width || !to.height) return;
+
+    const dx = from.left + from.width / 2 - (to.left + to.width / 2);
+    const dy = from.top + from.height / 2 - (to.top + to.height / 2);
+    const scale = Math.max(0.05, from.width / to.width);
+
+    el.style.transformOrigin = "center";
+    el.style.transform = `translate(${dx}px, ${dy}px) scale(${scale})`;
+    el.style.opacity = "0.6";
+
+    // Two frames: one to commit the inverted position, one to release it.
+    const raf = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        el.style.transition =
+          "transform 360ms cubic-bezier(0.16, 1, 0.3, 1), opacity 260ms ease";
+        el.style.transform = "";
+        el.style.opacity = "";
+      });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [from, photo.url]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    closeRef.current?.focus();
+    const { overflow } = document.body.style;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = overflow;
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-label={photo.caption ?? "Family photo"}
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="flex max-h-full w-full max-w-3xl flex-col gap-3">
+        <div className="flex items-center justify-end gap-2">
+          <button
+            onClick={onDelete}
+            className="rounded-full bg-white/10 px-3 py-2 text-xs font-semibold text-white/80 transition-colors hover:bg-white/20 hover:text-white"
+          >
+            Remove
+          </button>
+          <button
+            ref={closeRef}
+            onClick={onClose}
+            aria-label="Close"
+            className="grid h-10 w-10 place-items-center rounded-full bg-white/10 text-xl leading-none text-white transition-colors hover:bg-white/20"
+          >
+            ×
+          </button>
+        </div>
+
+        {photo.url ? (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img
+            ref={imgRef}
+            src={photo.url}
+            alt={photo.caption ?? "Family photo"}
+            className="max-h-[70vh] w-full rounded-xl object-contain"
+          />
+        ) : (
+          <p className="py-20 text-center text-sm text-white/70">Loading…</p>
+        )}
+
+        <div className="flex items-center gap-2.5 text-white/80">
+          {uploader ? <Avatar member={uploader} size="sm" /> : null}
+          <p className="min-w-0 flex-1 text-sm">
+            {photo.caption ? <span className="text-white">{photo.caption}</span> : null}
+            {photo.caption ? " · " : ""}
+            <span className="text-white/60">
+              {uploader ? `${uploader.name} · ` : ""}
+              {format(parseISO(photo.created_at), "MMM d, yyyy")}
+            </span>
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------- carousel */
+
+/** How long each photo holds before the next one comes up. */
+const SLIDE_MS = 5000;
+
+/**
+ * One photo at a time, advancing on its own.
+ *
+ * It pauses whenever someone is actually looking — pointer over it, keyboard
+ * focus inside it, or the tab in the background — because a photo sliding away
+ * mid-look is worse than no rotation at all. `prefers-reduced-motion` stops the
+ * automatic advance entirely rather than merely removing the fade: for that
+ * reader the movement *is* the problem, and the arrows still work.
+ */
+function Carousel({
+  photos,
+  onOpen,
+}: {
+  photos: PhotoWithUrl[];
+  /** The rect is the thumbnail's box, for the viewer to grow out of. */
+  onOpen: (p: PhotoWithUrl, rect: DOMRect | null) => void;
+}) {
+  const { byId } = useFamily();
+  const [index, setIndex] = useState(0);
+  const [paused, setPaused] = useState(false);
+
+  // A photo removed from under us must not leave the index out past the end.
+  const safeIndex = photos.length ? index % photos.length : 0;
+  const photo = photos[safeIndex];
+
+  const go = useCallback(
+    (delta: number) =>
+      setIndex((i) => (photos.length ? (i + delta + photos.length) % photos.length : 0)),
+    [photos.length],
+  );
+
+  useEffect(() => {
+    if (paused || photos.length < 2) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+    const id = window.setInterval(() => {
+      // Advancing a carousel nobody can see just burns signed-URL lifetime.
+      if (document.visibilityState === "visible") setIndex((i) => i + 1);
+    }, SLIDE_MS);
+    return () => window.clearInterval(id);
+  }, [paused, photos.length]);
+
+  if (!photo) return null;
+
+  const uploader = photo.uploaded_by ? byId[photo.uploaded_by] : null;
+
+  return (
+    <div
+      className="photo-carousel aspect-[4/3] w-full sm:aspect-[16/9]"
+      // The same flag that stops the advance stops the drift: someone looking
+      // closely should get a still photo, not one still creeping away.
+      data-paused={paused ? "true" : undefined}
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+      onFocusCapture={() => setPaused(true)}
+      onBlurCapture={() => setPaused(false)}
+      role="region"
+      aria-roledescription="carousel"
+      aria-label={`Family photos, ${safeIndex + 1} of ${photos.length}`}
+    >
+      {/* Keyed on the photo id so React remounts on every change and the fade
+          replays — without it the element persists and the animation runs once. */}
+      <button
+        key={photo.id}
+        type="button"
+        onClick={(e) => onOpen(photo, e.currentTarget.getBoundingClientRect())}
+        className="photo-carousel-slide absolute inset-0 block h-full w-full"
+        aria-label={photo.caption ? `Open: ${photo.caption}` : "Open this photo"}
+      >
+        {photo.url ? (
+          /*
+           * Ken Burns: a slow push in, drifting a little, over the twelve
+           * seconds a photo can be on screen. The direction alternates with
+           * the index so two photos in a row never pan the same way, which is
+           * what stops it reading as a broken zoom.
+           */
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img
+            src={photo.url}
+            alt={photo.caption ?? "Family photo"}
+            className="ken-burns h-full w-full object-cover"
+            data-direction={safeIndex % 2 === 1 ? "reverse" : undefined}
+            decoding="async"
+          />
+        ) : (
+          <span className="skeleton block h-full w-full" />
+        )}
+      </button>
+
+      {/* Sits above the slide, but only over the bottom strip, so most of the
+          photo stays clickable. */}
+      <div className="photo-carousel-scrim pointer-events-none absolute inset-x-0 bottom-0 flex items-end gap-3 p-3 sm:p-4">
+        <div className="min-w-0 flex-1">
+          {photo.caption ? (
+            <p className="truncate text-sm font-medium text-white">{photo.caption}</p>
+          ) : null}
+          <p className="truncate text-xs text-white/70">
+            {uploader ? `${uploader.name} · ` : ""}
+            {format(parseISO(photo.created_at), "MMM d")}
+          </p>
+        </div>
+
+        {photos.length > 1 ? (
+          <div className="flex shrink-0 items-center gap-1.5" aria-hidden>
+            {/* Capped: forty photos would otherwise become forty dots. */}
+            {photos.slice(0, 8).map((p, i) => (
+              <span key={p.id} className="photo-dot" data-active={i === safeIndex} />
+            ))}
+            {photos.length > 8 ? (
+              <span className="ml-0.5 text-[10px] font-semibold text-white/70 tabular-nums">
+                {safeIndex + 1}/{photos.length}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+
+      {photos.length > 1 ? (
+        <>
+          <CarouselArrow side="left" onClick={() => go(-1)} />
+          <CarouselArrow side="right" onClick={() => go(1)} />
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function CarouselArrow({
+  side,
+  onClick,
+}: {
+  side: "left" | "right";
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={side === "left" ? "Previous photo" : "Next photo"}
+      className={`absolute top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-full bg-black/35 text-lg leading-none text-white backdrop-blur-sm transition-colors hover:bg-black/55 ${
+        side === "left" ? "left-2" : "right-2"
+      }`}
+    >
+      {side === "left" ? "\u2039" : "\u203a"}
+    </button>
+  );
+}
+
+/* -------------------------------------------------------------------- wall */
+
+export function PhotoWall() {
+  const { currentMember } = useFamily();
+  const { photos, loading, uploading, error, addPhotos, removePhoto } = usePhotos();
+
+  const [dragging, setDragging] = useState(false);
+  const [open, setOpen] = useState<PhotoWithUrl | null>(null);
+  /** Where the photo was when it was opened, so the viewer can grow from it. */
+  const [openedFrom, setOpenedFrom] = useState<DOMRect | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
+
+  /**
+   * Photos go up as they are picked, with no caption box in the way.
+   *
+   * There used to be one, and it was asked for and then asked to go: in
+   * practice it was a field nobody filled in that stood between "I have a
+   * photo" and the photo being on the wall. Captions already on existing
+   * photos are still shown wherever they appear — the column stays, only the
+   * input is gone.
+   */
+  async function take(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    await addPhotos([...files], "", currentMember?.id ?? null);
+    // Clearing the inputs matters: picking the same file twice in a row is a
+    // no-op otherwise, because `change` never fires for an unchanged value.
+    if (fileRef.current) fileRef.current.value = "";
+    if (cameraRef.current) cameraRef.current.value = "";
+  }
+
+  const empty = !loading && photos.length === 0;
+
+  return (
+    <section>
+      <SectionTitle
+        action={
+          <span className="flex items-center gap-1.5">
+            <Button
+              variant="ghost"
+              onClick={() => cameraRef.current?.click()}
+              disabled={uploading}
+              className="min-h-9 px-3 py-1.5 text-xs"
+              title="Take a photo"
+            >
+              📷 Camera
+            </Button>
+            <Button
+              onClick={() => fileRef.current?.click()}
+              disabled={uploading}
+              className="min-h-9 px-3 py-1.5 text-xs"
+            >
+              {uploading ? "Uploading…" : "＋ Add photos"}
+            </Button>
+          </span>
+        }
+      >
+        Family photos
+      </SectionTitle>
+
+      <ErrorNote message={error} />
+
+      {/* Two inputs rather than one, because `capture` is not a mode you can
+          toggle on a single element: with it, a phone opens the camera and
+          never offers the camera roll; without it, it offers the roll (and, on
+          iOS, "Take Photo" inside the same sheet). Both paths matter — most
+          photos are already on the phone, and some are the thing that is
+          happening right now. */}
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        onChange={(e) => void take(e.target.files)}
+      />
+      <input
+        ref={cameraRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={(e) => void take(e.target.files)}
+      />
+
+      <Card
+        className={`p-3 transition-colors sm:p-4 ${
+          dragging ? "border-accent bg-accent-soft" : ""
+        }`}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragging(false);
+          void take(e.dataTransfer.files);
+        }}
+      >
+        {loading ? (
+          <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-6" role="status" aria-label="Loading photos">
+            <span className="skeleton block aspect-square rounded-lg" />
+            <span className="skeleton block aspect-square rounded-lg" />
+            <span className="skeleton block aspect-square rounded-lg" />
+            <span className="skeleton hidden aspect-square rounded-lg sm:block" />
+          </div>
+        ) : empty ? (
+          <div className="border-line flex flex-col items-center gap-3 rounded-lg border border-dashed px-6 py-10 text-center">
+            {/* Drifting, like something waiting to be filled. */}
+            <span
+              className="float-idle bg-accent-soft grid h-12 w-12 place-items-center rounded-xl text-2xl"
+              aria-hidden
+            >
+              🖼️
+            </span>
+            <p className="text-sm font-medium">No photos on the wall yet</p>
+            <p className="text-muted max-w-xs text-xs">
+              Drop them here, pick some from your camera roll, or take one now.
+              Everyone in the house sees them straight away.
+            </p>
+            <Button variant="ghost" onClick={() => fileRef.current?.click()} disabled={uploading}>
+              {uploading ? "Uploading…" : "Choose photos"}
+            </Button>
+          </div>
+        ) : (
+          <Carousel
+            photos={photos}
+            onOpen={(p, rect) => {
+              setOpenedFrom(rect);
+              setOpen(p);
+            }}
+          />
+        )}
+      </Card>
+
+      {open ? (
+        <Lightbox
+          photo={open}
+          from={openedFrom}
+          onClose={() => setOpen(null)}
+          onDelete={() => {
+            void removePhoto(open.id);
+            setOpen(null);
+          }}
+        />
+      ) : null}
+    </section>
+  );
+}

@@ -7,7 +7,7 @@
  *
  * Supabase traffic is never touched — stale messages are worse than none.
  */
-const CACHE = "family-dashboard-v1";
+const CACHE = "family-dashboard-v2";
 const SHELL = "/";
 
 self.addEventListener("install", (event) => {

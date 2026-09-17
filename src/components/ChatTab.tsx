@@ -3,14 +3,18 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useMessages, type OutgoingAttachment } from "@/hooks/useMessages";
 import { useReactions } from "@/hooks/useReactions";
+import { createTodo } from "@/hooks/useTodos";
 import { useVoiceRecorder } from "@/hooks/useVoiceRecorder";
 import { formatChatDay, formatTime, parseISO } from "@/lib/dates";
 import { tint } from "@/lib/palette";
 import { formatBytes, formatDuration, uploadMedia } from "@/lib/storage";
 import {
   REACTION_EMOJI,
+  conversationKeyFor,
   type AttachmentKind,
+  type ConversationId,
   type Message,
+  type MemberWithPhoto,
   type ReactionEmoji,
   type ReactionSummary,
 } from "@/lib/types";
@@ -183,27 +187,27 @@ function ReactionPills({
             aria-label={`${s.emoji}, ${s.memberIds.length} ${
               s.memberIds.length === 1 ? "person" : "people"
             }${s.mine ? ", including you" : ""}. Toggle your reaction.`}
-            className={`inline-flex items-center gap-1 rounded-full border py-0.5 pr-1.5 pl-1.5 text-[11px] transition-colors ${
+            className={`reaction-pill inline-flex items-center gap-1 rounded-full border py-0.5 pr-1.5 pl-1.5 text-[11px] transition-[background-color,border-color,transform] ${
               s.mine
                 ? "border-accent bg-accent/12 text-ink font-semibold"
                 : "border-line bg-surface text-muted hover:bg-sunk"
             }`}
           >
-            <span aria-hidden>{s.emoji}</span>
-            {/* Faces beat a bare number in a five-person house — you can see at
-                a glance whether the person you care about laughed. */}
+            <span className="text-[13px] leading-none" aria-hidden>{s.emoji}</span>
+            {/* Faces answer "who", the number answers "how many". Two faces and
+                the digit 2 are not redundant at a glance — the digit is what
+                scans, the faces are what you actually care about. Capped at two
+                so a five-person pile-up cannot outgrow the bubble. */}
             <span className="flex -space-x-1.5" aria-hidden>
-              {people.slice(0, 3).map((p) => (
+              {people.slice(0, 2).map((p) => (
                 <span key={p.id} className="ring-surface rounded-full ring-2">
                   <Avatar member={p} size="xs" />
                 </span>
               ))}
             </span>
-            {people.length > 3 ? (
-              <span className="tabular-nums" aria-hidden>
-                +{people.length - 3}
-              </span>
-            ) : null}
+            <span className="min-w-[0.75rem] text-center tabular-nums" aria-hidden>
+              {s.memberIds.length}
+            </span>
           </button>
         );
       })}
@@ -216,15 +220,20 @@ function ReactionPicker({
   summaries,
   onPick,
   onDelete,
+  onMakeTodo,
+  todoState,
 }: {
   summaries: ReactionSummary[];
   onPick: (emoji: ReactionEmoji) => void;
   onDelete: (() => void) | null;
+  /** Null when there is nothing to turn into a task — an image with no words. */
+  onMakeTodo: (() => void) | null;
+  todoState: "idle" | "saving" | "done";
 }) {
   const mineFor = (emoji: ReactionEmoji) => summaries.some((s) => s.emoji === emoji && s.mine);
 
   return (
-    <div className="border-line bg-surface flex items-center gap-0.5 rounded-full border p-1 shadow-lg">
+    <div className="reaction-picker border-line bg-surface flex items-center gap-0.5 rounded-full border p-1 shadow-lg">
       {REACTION_EMOJI.map((emoji) => (
         <button
           key={emoji}
@@ -238,6 +247,22 @@ function ReactionPicker({
           <span aria-hidden>{emoji}</span>
         </button>
       ))}
+      {onMakeTodo ? (
+        <>
+          <span className="bg-line mx-0.5 h-5 w-px" aria-hidden />
+          <button
+            onClick={onMakeTodo}
+            disabled={todoState !== "idle"}
+            aria-label="Make this message a task"
+            title={todoState === "done" ? "Added to To Do's" : "Make this a task"}
+            className={`grid h-8 w-8 place-items-center rounded-full text-sm transition-colors ${
+              todoState === "done" ? "text-accent" : "text-faint hover:bg-sunk hover:text-ink"
+            }`}
+          >
+            <span aria-hidden>{todoState === "done" ? "✅" : todoState === "saving" ? "…" : "＋"}</span>
+          </button>
+        </>
+      ) : null}
       {onDelete ? (
         <>
           <span className="bg-line mx-0.5 h-5 w-px" aria-hidden />
@@ -254,10 +279,200 @@ function ReactionPicker({
   );
 }
 
+/* ------------------------------------------------------------------ links */
+
+/** Matches bare http(s) URLs. Trailing punctuation is trimmed below. */
+const URL_RE = /https?:\/\/[^\s<>"]+/gi;
+
+/** Sentence punctuation that ends up glued to a pasted link. */
+function trimTrailing(url: string): string {
+  return url.replace(/[.,;:!?)\]}'"]+$/, "");
+}
+
+function firstLink(text: string): string | null {
+  const match = text.match(URL_RE);
+  return match ? trimTrailing(match[0]) : null;
+}
+
+/**
+ * A shared link, as a card rather than a blue run of text.
+ *
+ * Deliberately built only from the URL itself — host, then path. A real preview
+ * means fetching the page's title and image, and this app is a static export
+ * with no server to do that: the browser would have to fetch the target
+ * directly, which CORS forbids for most sites and which would leak every link
+ * the family shares to that site as a request from their home address. A card
+ * that shows what is actually knowable is better than one that invents it.
+ */
+function LinkCard({ url, mine }: { url: string; mine: boolean }) {
+  let host: string;
+  let path: string;
+  try {
+    const parsed = new URL(url);
+    host = parsed.host.replace(/^www\./, "");
+    path = parsed.pathname === "/" ? "" : decodeURIComponent(parsed.pathname);
+  } catch {
+    // Not parseable, so it is not really a link — let the text render as text.
+    return null;
+  }
+
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noreferrer noopener"
+      className={`link-card mt-1 flex items-center gap-2.5 rounded-xl px-3 py-2 no-underline ${
+        mine ? "link-card-mine" : ""
+      }`}
+    >
+      <span className="link-card-glyph grid h-8 w-8 shrink-0 place-items-center rounded-lg text-sm" aria-hidden>
+        🔗
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-xs font-semibold">{host}</span>
+        {path ? <span className="block truncate text-[11px] opacity-70">{path}</span> : null}
+      </span>
+      <span className="shrink-0 text-xs opacity-60" aria-hidden>
+        ↗
+      </span>
+    </a>
+  );
+}
+
+/** Message text with any URLs turned into real links. */
+function MessageText({ text }: { text: string }) {
+  const parts: React.ReactNode[] = [];
+  let last = 0;
+
+  for (const match of text.matchAll(URL_RE)) {
+    const raw = match[0];
+    const url = trimTrailing(raw);
+    const start = match.index ?? 0;
+    if (start > last) parts.push(text.slice(last, start));
+    parts.push(
+      <a
+        key={`${start}-${url}`}
+        href={url}
+        target="_blank"
+        rel="noreferrer noopener"
+        className="underline underline-offset-2"
+      >
+        {url}
+      </a>,
+    );
+    // Anything trimmed off the end is punctuation and belongs to the sentence.
+    last = start + url.length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+
+  return <p>{parts}</p>;
+}
+
+/* ---------------------------------------------------------- Conversations */
+
+/** The "something happened here" mark on a conversation you are not reading. */
+function UnreadDot() {
+  return (
+    // `badge-pop` runs on mount, which is exactly when the dot means something:
+    // it appears the moment a thread moves on without you.
+    <span className="badge-pop bg-accent absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full">
+      <span className="sr-only">Unread messages</span>
+    </span>
+  );
+}
+
+/**
+ * Everyone, or one person.
+ *
+ * Deliberately the same pill strip the Calendar tab uses for whose schedule to
+ * show — this is the second place in the app that means "filter to one member",
+ * and two different controls for one idea is how an app starts feeling
+ * assembled rather than designed.
+ *
+ * Two differences from that one. You are not in the list: a message to yourself
+ * is rejected by a CHECK constraint and means nothing anyway. And the pills set
+ * rather than toggle, because Everyone has its own pill to go back to.
+ */
+function ConversationBar({
+  peers,
+  meId,
+  active,
+  unread,
+  disabled,
+  onPick,
+}: {
+  peers: MemberWithPhoto[];
+  meId: string | null;
+  active: ConversationId;
+  unread: Record<string, boolean>;
+  disabled: boolean;
+  onPick: (id: ConversationId) => void;
+}) {
+  const dotFor = (target: ConversationId) =>
+    meId ? unread[conversationKeyFor(meId, target)] : false;
+
+  return (
+    <div
+      className="scroll-area -mx-1 mb-3 flex gap-2 overflow-x-auto px-1 pb-1"
+      role="tablist"
+      aria-label="Conversation"
+    >
+      <button
+        role="tab"
+        aria-selected={active === null}
+        disabled={disabled}
+        onClick={() => onPick(null)}
+        className={`relative inline-flex shrink-0 items-center gap-2 rounded-full border px-3.5 py-2 text-sm font-medium transition-colors disabled:opacity-50 ${
+          active === null
+            ? "border-ink bg-ink text-on-ink"
+            : "border-line bg-surface text-muted hover:bg-sunk"
+        }`}
+      >
+        <span aria-hidden>👪</span>
+        Everyone
+        {active !== null && dotFor(null) ? <UnreadDot /> : null}
+      </button>
+
+      {peers.map((m) => {
+        const isActive = active === m.id;
+        return (
+          <button
+            key={m.id}
+            role="tab"
+            aria-selected={isActive}
+            disabled={disabled}
+            onClick={() => onPick(m.id)}
+            className={`relative inline-flex shrink-0 items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors disabled:opacity-50 ${
+              isActive ? "text-ink" : "border-line bg-surface text-muted hover:bg-sunk"
+            }`}
+            style={
+              isActive
+                ? { borderColor: m.color, backgroundColor: tint(m.color, 0.14) }
+                : undefined
+            }
+          >
+            <Avatar member={m} size="sm" ring={isActive} />
+            {m.name}
+            {!isActive && dotFor(m.id) ? <UnreadDot /> : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------- Tab */
 
 export function ChatTab() {
-  const { currentMember, byId } = useFamily();
+  const { currentMember, byId, members } = useFamily();
+  const meId = currentMember?.id ?? null;
+
+  /** `null` is the family thread; a member id is a one-to-one conversation. */
+  const [conversation, setConversation] = useState<ConversationId>(null);
+  const peers = useMemo(() => members.filter((m) => m.id !== meId), [members, meId]);
+  const peerIds = useMemo(() => peers.map((m) => m.id), [peers]);
+  const other = conversation ? (byId[conversation] ?? null) : null;
+
   const {
     messages,
     mediaUrls,
@@ -265,10 +480,11 @@ export function ChatTab() {
     loadingOlder,
     hasOlder,
     error,
+    unread,
     sendMessage,
     deleteMessage,
     loadOlder,
-  } = useMessages();
+  } = useMessages(meId, conversation, peerIds);
   const reactions = useReactions();
   const recorder = useVoiceRecorder();
 
@@ -280,12 +496,36 @@ export function ChatTab() {
   /** Message queued for deletion, held until the prompt is answered. */
   const [pendingDelete, setPendingDelete] = useState<Message | null>(null);
   const [deleting, setDeleting] = useState(false);
+  /** message id → how its "make this a task" button is doing. */
+  const [todoStates, setTodoStates] = useState<Record<string, "saving" | "done">>({});
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  /* Three pickers, not one. `capture` cannot be toggled on a single input —
+     with it a phone opens the camera and never offers the camera roll, without
+     it the roll — and `accept="image/*"` is what makes the roll the first thing
+     iOS shows instead of the Files app. So: the roll, the camera, and anything
+     at all, each with its own element. */
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const [attachOpen, setAttachOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const pinnedToBottom = useRef(true);
 
-  const meId = currentMember?.id ?? null;
+  /*
+   * Messages that have been typed and are still on their way.
+   *
+   * A local list rather than an optimistic insert into the thread: the real row
+   * arrives over Realtime with its own id and timestamp, and writing a fake one
+   * into the cache would mean reconciling the two. These are drawn after the
+   * last real bubble, dimmed and with the sending dots under them, and dropped
+   * the moment the insert resolves.
+   */
+  const [sending, setSending] = useState<{ id: number; text: string }[]>([]);
+  const sendSeq = useRef(0);
+
+  /** A message arrived while the reader was scrolled back into the history. */
+  const [newBelow, setNewBelow] = useState(0);
+
   const rows = useMemo(() => render(messages, meId), [messages, meId]);
 
   // Pull reactions for whatever is on screen, including pages loaded later.
@@ -301,18 +541,56 @@ export function ChatTab() {
     const el = scrollRef.current;
     if (!el) return;
     pinnedToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    // Scrolling back down by hand answers the pill as well as tapping it does.
+    if (pinnedToBottom.current) setNewBelow(0);
   }
 
+  // Re-pin on anything that changes the thread's height: a new message, and
+  // the reaction pills that arrive on a later tick. When the reader is *not*
+  // pinned, the same event is what the "New messages" pill counts.
+  const lastRowCount = useRef(rows.length);
   useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (el && pinnedToBottom.current) el.scrollTop = el.scrollHeight;
-  }, [rows.length]);
+    const grew = rows.length - lastRowCount.current;
+    lastRowCount.current = rows.length;
+
+    if (el && pinnedToBottom.current) {
+      el.scrollTop = el.scrollHeight;
+      return;
+    }
+    if (grew > 0) setNewBelow((n) => n + grew);
+    // `sending.length` belongs here too: a pending bubble adds height exactly
+    // like a real one, and without it your own message goes out of sight the
+    // moment you press Enter.
+  }, [rows.length, reactions.count, sending.length]);
+
+  /** The pill's job: put the reader back at the bottom and clear itself. */
+  function jumpToLatest() {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    pinnedToBottom.current = true;
+    setNewBelow(0);
+  }
 
   useEffect(() => {
     if (!loading && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [loading]);
+    // `conversation` is in here so that switching into an already-cached thread
+    // still opens at the bottom — that path never flips `loading`.
+  }, [loading, conversation]);
+
+  // A reaction picker or a delete prompt is anchored to one message. Carrying
+  // either across a switch leaves an overlay pointing at nothing.
+  function pickConversation(next: ConversationId) {
+    if (next === conversation) return;
+    setActiveId(null);
+    setPendingDelete(null);
+    setNewBelow(0);
+    pinnedToBottom.current = true;
+    setConversation(next);
+  }
 
   // Dismiss the picker on Escape, matching the modal's behaviour.
   useEffect(() => {
@@ -330,13 +608,25 @@ export function ChatTab() {
     if (!body || !currentMember) return;
     setDraft("");
     pinnedToBottom.current = true;
-    await sendMessage(currentMember.id, body);
+
+    // The bubble appears the instant Enter is pressed, with the dots under it,
+    // and the field is free again — which is the whole point on a thread where
+    // people send three lines in a row.
+    const id = ++sendSeq.current;
+    setSending((prev) => [...prev, { id, text: body }]);
+    await sendMessage(currentMember.id, conversation, body);
+    setSending((prev) => prev.filter((p) => p.id !== id));
   }
 
   async function onFilePicked(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = ""; // let the same file be picked again later
     if (!file || !currentMember) return;
+
+    // Captured before the upload: an await is long enough for someone to tap a
+    // different pill, and a photo delivered to the wrong person is not a bug
+    // you can take back.
+    const target = conversation;
 
     setUploadError(null);
     setBusy("Uploading…");
@@ -356,13 +646,14 @@ export function ChatTab() {
       duration: null,
     };
     pinnedToBottom.current = true;
-    await sendMessage(currentMember.id, draft.trim(), attachment);
+    await sendMessage(currentMember.id, target, draft.trim(), attachment);
     setDraft("");
     setBusy(null);
   }
 
   async function finishRecording() {
     if (!currentMember) return;
+    const target = conversation; // see onFilePicked
     const clip = await recorder.stop();
     if (!clip) return;
 
@@ -376,7 +667,7 @@ export function ChatTab() {
     }
 
     pinnedToBottom.current = true;
-    await sendMessage(currentMember.id, "", {
+    await sendMessage(currentMember.id, target, "", {
       path: uploaded.path,
       kind: "voice",
       name: "Voice note",
@@ -396,6 +687,40 @@ export function ChatTab() {
     setActiveId(null);
   }
 
+  // Annotated rather than inferred: `Record<string, T>` indexing is typed as T
+  // here, so without this the `?? "idle"` reads as unreachable and every
+  // comparison against "idle" is rejected.
+  const todoStateFor = (id: string): "idle" | "saving" | "done" =>
+    todoStates[id] ?? "idle";
+
+  /**
+   * Turn a message into a task, unassigned and undated.
+   *
+   * Deliberately one tap with no dialog: the point is to capture "we need to
+   * book the dentist" before it scrolls away, and a form asking who and when
+   * would make it slower than retyping it on the To Do's tab. It lands on the
+   * board where it can be assigned and dated properly.
+   */
+  async function makeTodo(message: Message) {
+    const text = message.message_text.trim();
+    if (!text || todoStateFor(message.id) !== "idle") return;
+
+    setTodoStates((prev) => ({ ...prev, [message.id]: "saving" }));
+    const result = await createTodo(text, [], null, currentMember?.id ?? null);
+
+    if (!result.ok) {
+      setUploadError(result.error);
+      setTodoStates((prev) => {
+        const next = { ...prev };
+        delete next[message.id];
+        return next;
+      });
+      return;
+    }
+    setTodoStates((prev) => ({ ...prev, [message.id]: "done" }));
+    setActiveId(null);
+  }
+
   function toggleReaction(messageId: string, emoji: ReactionEmoji) {
     if (!currentMember) return;
     void reactions.toggle(messageId, currentMember.id, emoji);
@@ -406,23 +731,58 @@ export function ChatTab() {
   const deletingPhoto = pendingDelete?.attachment_kind === "image";
 
   return (
+    // The height is unchanged by the conversation bar on purpose: this is a
+    // fixed-height column and the scroll area is the only flex-1 child, so a
+    // new sibling shrinks the message list rather than pushing the composer off
+    // the bottom. Padding it out for the bar would just leave dead space.
     <div className="flex h-[calc(100dvh-12.5rem)] flex-col sm:h-[calc(100dvh-9.5rem)]">
+      <ConversationBar
+        peers={peers}
+        meId={meId}
+        active={conversation}
+        unread={unread}
+        // Switching mid-upload would strand the "Uploading…" state on a thread
+        // that is no longer open.
+        disabled={Boolean(busy)}
+        onPick={pickConversation}
+      />
+
+      {other ? (
+        <p className="text-faint mb-2 px-1 text-[11px] leading-snug">
+          Just between you and {other.name} — the rest of the family can&rsquo;t see this
+          in the app. It isn&rsquo;t private from anyone with the site link, though;
+          there&rsquo;s no login yet.
+        </p>
+      ) : null}
+
       <ErrorNote message={error ?? uploadError ?? reactions.error ?? recorder.error} />
 
       <div
         ref={scrollRef}
         onScroll={onScroll}
-        className="scroll-area border-line bg-surface flex-1 overflow-y-auto rounded-3xl border px-3 py-4 sm:px-4"
+        className="chat-panel scroll-area border-line bg-surface flex-1 overflow-y-auto rounded-3xl border px-3 pt-4 pb-7 sm:px-5 sm:pt-5 sm:pb-8"
       >
         {loading ? (
-          <p className="text-muted py-8 text-center text-sm">Loading messages…</p>
+          <div className="space-y-3 py-4" aria-label="Loading messages" role="status">
+            <span className="skeleton block h-12 w-3/4 rounded-2xl" />
+            <span className="skeleton ml-auto block h-10 w-1/2 rounded-2xl" />
+            <span className="skeleton block h-16 w-2/3 rounded-2xl" />
+          </div>
         ) : rows.length === 0 ? (
           <div className="text-muted flex h-full flex-col items-center justify-center gap-2 text-center">
-            <span className="text-4xl" aria-hidden>
-              💬
-            </span>
-            <p className="text-ink text-sm font-medium">No messages yet</p>
-            <p className="text-xs">Say hello to the family.</p>
+            {other ? (
+              <Avatar member={other} size="lg" />
+            ) : (
+              <span className="text-4xl" aria-hidden>
+                💬
+              </span>
+            )}
+            <p className="text-ink text-sm font-medium">
+              {other ? `No messages with ${other.name} yet` : "No messages yet"}
+            </p>
+            <p className="text-xs">
+              {other ? `Start a conversation with ${other.name}.` : "Say hello to the family."}
+            </p>
           </div>
         ) : (
           <>
@@ -467,11 +827,10 @@ export function ChatTab() {
                       r.mine ? "justify-end" : "justify-start"
                     } ${r.endsGroup ? "mb-3" : "mb-1"}`}
                   >
-                    {!r.mine ? (
-                      <span className={r.endsGroup ? "" : "invisible"}>
-                        <Avatar member={sender} size="sm" />
-                      </span>
-                    ) : null}
+                    {/* A spacer, not an avatar. The avatar moved up beside the
+                        sender's name where it is easier to scan; this only
+                        keeps every bubble in a group on the same left edge. */}
+                    {!r.mine ? <span className="w-7 shrink-0" aria-hidden /> : null}
 
                     <div
                       className={`flex min-w-0 max-w-[78%] flex-col ${
@@ -479,11 +838,20 @@ export function ChatTab() {
                       }`}
                     >
                       {!r.mine && r.startsGroup ? (
-                        <span
-                          className="mb-1 ml-1.5 text-[11px] font-semibold tracking-wide"
-                          style={{ color }}
-                        >
-                          {sender?.name ?? "Unknown"}
+                        <span className="mb-1 -ml-8 flex items-center gap-1.5">
+                          {/* `decorative` is load-bearing: Avatar otherwise
+                              carries the name as alt/sr-only, which the label
+                              beside it then repeats — announced twice by a
+                              screen reader, and rendered twice on screen the
+                              moment a signed avatar URL lapses and the browser
+                              falls back to the alt text. */}
+                          <Avatar member={sender} size="sm" decorative />
+                          <span
+                            className="text-[11px] font-semibold tracking-wide"
+                            style={{ color }}
+                          >
+                            {sender?.name ?? "Unknown"}
+                          </span>
                         </span>
                       ) : null}
 
@@ -514,7 +882,7 @@ export function ChatTab() {
                               e.preventDefault();
                               setActiveId(isActive ? null : r.message.id);
                             }}
-                            className={`cursor-pointer space-y-1.5 px-3.5 py-2 text-sm break-words whitespace-pre-wrap shadow-sm transition-shadow hover:shadow-md ${
+                            className={`chat-bubble cursor-pointer space-y-1.5 px-3.5 py-2.5 text-sm break-words whitespace-pre-wrap shadow-sm transition-[box-shadow,transform] hover:-translate-y-px hover:shadow-md ${
                               r.mine ? "bg-ink text-on-ink" : "text-ink"
                             } ${isActive ? "ring-accent/45 ring-2" : ""}`}
                             style={{
@@ -533,7 +901,15 @@ export function ChatTab() {
                               }
                               mine={r.mine}
                             />
-                            {r.message.message_text ? <p>{r.message.message_text}</p> : null}
+                            {r.message.message_text ? (
+                              <>
+                                <MessageText text={r.message.message_text} />
+                                {(() => {
+                                  const url = firstLink(r.message.message_text);
+                                  return url ? <LinkCard url={url} mine={r.mine} /> : null;
+                                })()}
+                              </>
+                            ) : null}
                           </div>
 
                           {isActive ? (
@@ -546,6 +922,12 @@ export function ChatTab() {
                                 onDelete={
                                   canDelete ? () => setPendingDelete(r.message) : null
                                 }
+                                onMakeTodo={
+                                  r.message.message_text.trim()
+                                    ? () => void makeTodo(r.message)
+                                    : null
+                                }
+                                todoState={todoStateFor(r.message.id)}
                               />
                             </div>
                           ) : null}
@@ -568,13 +950,55 @@ export function ChatTab() {
                 </div>
               );
             })}
+
+            {/* Still on its way. Drawn as your own bubble, dimmed, with the
+                dots under it — so a slow connection looks like a message
+                travelling rather than a message that did not send. */}
+            {sending.map((p) => (
+              <div key={`sending:${p.id}`} className="mb-3 flex items-end justify-end gap-2">
+                <div className="flex min-w-0 max-w-[78%] flex-col items-end">
+                  <div
+                    className="chat-bubble bg-ink text-on-ink px-3.5 py-2.5 text-sm break-words whitespace-pre-wrap opacity-70 shadow-sm"
+                    style={{ borderRadius: 20, borderBottomRightRadius: 6 }}
+                  >
+                    {p.text}
+                  </div>
+                  <span className="text-faint mt-1 flex items-center gap-1.5 px-1 text-[10px]">
+                    <span className="sending-dots" aria-hidden>
+                      <span />
+                      <span />
+                      <span />
+                    </span>
+                    Sending
+                  </span>
+                </div>
+              </div>
+            ))}
           </>
         )}
       </div>
 
+      {/* A message landed while the reader was up in the history. The pill is
+          the only thing that moves — the thread itself stays exactly where it
+          was put, which is the reason not to auto-scroll in the first place. */}
+      {newBelow > 0 ? (
+        <div className="pointer-events-none relative">
+          <div className="absolute inset-x-0 -top-14 flex justify-center">
+            <button
+              onClick={jumpToLatest}
+              className="new-messages-pill bg-ink text-on-ink pointer-events-auto inline-flex items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-semibold shadow-lg"
+              aria-live="polite"
+            >
+              {newBelow} new {newBelow === 1 ? "message" : "messages"}
+              <span aria-hidden>↓</span>
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       {/* ------------------------------------------------------- composer */}
       {recorder.recording ? (
-        <div className="border-line bg-surface mt-3 flex items-center gap-3 rounded-2xl border px-4 py-3">
+        <div className="chat-composer border-line bg-surface mt-3 flex items-center gap-3 rounded-2xl border px-4 py-3 shadow-sm">
           <span
             className="bg-danger h-2.5 w-2.5 animate-pulse rounded-full"
             aria-hidden
@@ -598,7 +1022,7 @@ export function ChatTab() {
           </button>
         </div>
       ) : (
-        <form onSubmit={submitText} className="mt-3 flex items-end gap-2">
+        <form onSubmit={submitText} className="chat-composer mt-3 flex items-end gap-2">
           <input
             ref={fileInputRef}
             type="file"
@@ -607,16 +1031,77 @@ export function ChatTab() {
             aria-hidden
             tabIndex={-1}
           />
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={!canSend}
-            className="border-line hover:bg-sunk grid h-11 w-11 shrink-0 place-items-center rounded-full border text-lg transition-colors disabled:opacity-40"
-            aria-label="Attach a file or photo"
-            title="Attach a file or photo"
-          >
-            📎
-          </button>
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept="image/*"
+            onChange={onFilePicked}
+            className="hidden"
+            aria-hidden
+            tabIndex={-1}
+          />
+          <input
+            ref={cameraInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            onChange={onFilePicked}
+            className="hidden"
+            aria-hidden
+            tabIndex={-1}
+          />
+
+          <div className="relative shrink-0">
+            <button
+              type="button"
+              onClick={() => setAttachOpen((v) => !v)}
+              disabled={!canSend}
+              aria-expanded={attachOpen}
+              aria-haspopup="menu"
+              className="border-line hover:bg-sunk grid h-11 w-11 place-items-center rounded-full border text-lg transition-colors disabled:opacity-40"
+              aria-label="Attach a photo or a file"
+              title="Attach a photo or a file"
+            >
+              📎
+            </button>
+
+            {attachOpen ? (
+              <>
+                {/* A click-away layer rather than a document listener: the menu
+                    is one tap deep and this keeps the whole thing local. */}
+                <button
+                  type="button"
+                  className="fixed inset-0 z-40 cursor-default"
+                  aria-label="Close the attach menu"
+                  onClick={() => setAttachOpen(false)}
+                />
+                <div
+                  role="menu"
+                  className="border-line bg-surface absolute bottom-13 left-0 z-50 w-44 overflow-hidden rounded-xl border shadow-lg"
+                >
+                  {[
+                    { label: "Photo library", icon: "🖼️", ref: photoInputRef },
+                    { label: "Take a photo", icon: "📷", ref: cameraInputRef },
+                    { label: "File", icon: "📄", ref: fileInputRef },
+                  ].map((option) => (
+                    <button
+                      key={option.label}
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setAttachOpen(false);
+                        option.ref.current?.click();
+                      }}
+                      className="hover:bg-sunk flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm font-medium"
+                    >
+                      <span aria-hidden>{option.icon}</span>
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : null}
+          </div>
 
           <textarea
             value={draft}
@@ -632,10 +1117,14 @@ export function ChatTab() {
             maxLength={2000}
             placeholder={
               busy ??
-              (currentMember ? `Message as ${currentMember.name}…` : "Pick a profile first")
+              (!currentMember
+                ? "Pick a profile first"
+                : other
+                  ? `Message ${other.name}…`
+                  : `Message as ${currentMember.name}…`)
             }
             disabled={!canSend}
-            className="border-line bg-surface text-ink placeholder:text-faint focus:border-ink max-h-32 min-h-[2.75rem] flex-1 resize-none rounded-2xl border px-4 py-3 text-sm focus:outline-none disabled:opacity-60"
+            className="border-line bg-surface text-ink placeholder:text-faint focus:border-accent focus:ring-accent/20 max-h-32 min-h-[2.75rem] flex-1 resize-none rounded-2xl border px-4 py-3 text-sm shadow-sm focus:outline-none focus:ring-4 disabled:opacity-60"
           />
 
           {draft.trim() ? (
@@ -670,7 +1159,9 @@ export function ChatTab() {
         title={deletingPhoto ? "Delete this photo?" : "Delete this message?"}
       >
         <p className="text-muted text-sm">
-          This removes it for everyone in the family, on every device.
+          {other
+            ? `This removes it for both you and ${other.name}, on every device.`
+            : "This removes it for everyone in the family, on every device."}
           {pendingDelete?.attachment_path ? (
             <>
               {" "}
@@ -689,7 +1180,7 @@ export function ChatTab() {
             Cancel
           </Button>
           <Button type="button" variant="danger" disabled={deleting} onClick={confirmDelete}>
-            {deleting ? "Deleting…" : "Delete for everyone"}
+            {deleting ? "Deleting…" : other ? "Delete for both" : "Delete for everyone"}
           </Button>
         </div>
       </Modal>

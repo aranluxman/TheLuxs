@@ -11,13 +11,15 @@ import { Shell } from "./Shell";
 
 function MissingConfig() {
   return (
-    <main className="mx-auto w-full max-w-lg px-6 py-20">
-      <h1 className="text-xl font-semibold">Supabase isn&rsquo;t configured</h1>
+    <main className="mx-auto flex w-full max-w-lg flex-1 flex-col justify-center px-6 py-20">
+      <div className="brand-mark mb-5" aria-hidden>F</div>
+      <p className="text-accent text-[11px] font-bold tracking-[0.14em] uppercase">Setup needed</p>
+      <h1 className="mt-2 text-2xl font-bold tracking-tight">Supabase isn&rsquo;t configured</h1>
       <p className="text-muted mt-3 text-sm">
         This build was made without <code className="font-mono">NEXT_PUBLIC_SUPABASE_URL</code> and{" "}
         <code className="font-mono">NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY</code>. Add them to{" "}
         <code className="font-mono">.env.local</code> (or to your Cloudflare Pages build
-        settings) and rebuild — they are inlined at build time, so restarting alone
+        settings) and rebuild. The values are inlined at build time, so restarting alone
         will not pick them up.
       </p>
     </main>
@@ -29,8 +31,14 @@ function Gate() {
 
   if (loading) {
     return (
-      <main className="text-muted flex flex-1 items-center justify-center text-sm">
-        Loading…
+      <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-5 px-4 pt-8">
+        <span className="skeleton h-9 w-48 rounded-xl" />
+        <span className="skeleton h-32 w-full rounded-3xl" />
+        <span
+          className="skeleton h-48 w-full rounded-3xl"
+          role="status"
+          aria-label="Loading family dashboard"
+        />
       </main>
     );
   }
