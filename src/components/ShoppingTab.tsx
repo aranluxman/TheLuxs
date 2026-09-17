@@ -60,13 +60,15 @@ function ItemRow({
           </svg>
         </span>
         <span className="min-w-0 flex-1">
-          {/* Drawn across, not switched on — see the .strike rules. */}
+          {/* Drawn across, not switched on — see the .strike rules. The rule
+              lives on an inline child so it is the width of the name rather
+              than the width of the row; truncation stays on the block parent. */}
           <span
-            className={`tick-label strike block truncate text-sm ${
+            className={`tick-label block truncate text-sm ${
               done ? "text-faint" : "font-medium"
             }`}
           >
-            {item.name}
+            <span className="strike">{item.name}</span>
           </span>
           <span className="text-faint block truncate text-xs">
             {item.note ? `${item.note} · ` : ""}

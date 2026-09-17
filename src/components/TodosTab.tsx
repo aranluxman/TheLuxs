@@ -316,13 +316,15 @@ function TodoRow({
 
         <span className="min-w-0 flex-1">
           {/* `strike` draws the line across rather than switching
-              `line-through` on — see the .strike rules in globals.css. */}
+              `line-through` on — see the .strike rules in globals.css. It sits
+              on an inline child so the line is the width of the title, not of
+              the row; the block parent keeps the truncation. */}
           <span
-            className={`tick-label strike block truncate text-sm ${
+            className={`tick-label block truncate text-sm ${
               done ? "text-faint" : "font-medium"
             }`}
           >
-            {todo.title}
+            <span className="strike">{todo.title}</span>
           </span>
           <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs">
             {assignees.length ? (

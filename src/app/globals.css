@@ -1435,6 +1435,8 @@ select:focus-visible {
  */
 .strike {
   position: relative;
+  /* Inline, so the pseudo-element below is as wide as the words it crosses. */
+  display: inline;
 }
 
 .strike::after {
