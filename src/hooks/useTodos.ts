@@ -115,7 +115,12 @@ export function useTodos(ready = true) {
     };
   }, [ready]);
 
-  /** @param assigneeIds who it is for. Empty is the whole house. */
+  /**
+   * @param assigneeIds who it is for. Empty is the whole house.
+   * @returns the new task's id, or null if it did not save. The id is what
+   *          lets the board highlight where the task actually landed — it
+   *          sorts by due date, so it is rarely at the bottom of the list.
+   */
   const addTodo = useCallback(
     async (
       title: string,
@@ -125,7 +130,7 @@ export function useTodos(ready = true) {
       estimateMinutes: number | null = null,
     ) => {
       const trimmed = title.trim();
-      if (!trimmed) return false;
+      if (!trimmed) return null;
 
       const { data, error: err } = await getSupabase()
         .from("family_todos")
@@ -141,11 +146,11 @@ export function useTodos(ready = true) {
 
       if (err) {
         setError(err.message);
-        return false;
+        return null;
       }
       const row = data as Todo;
       setTodos((prev) => (prev.some((t) => t.id === row.id) ? prev : [...prev, row]));
-      return true;
+      return row.id;
     },
     [],
   );

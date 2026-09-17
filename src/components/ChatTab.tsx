@@ -373,7 +373,9 @@ function MessageText({ text }: { text: string }) {
 /** The "something happened here" mark on a conversation you are not reading. */
 function UnreadDot() {
   return (
-    <span className="bg-accent absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full">
+    // `badge-pop` runs on mount, which is exactly when the dot means something:
+    // it appears the moment a thread moves on without you.
+    <span className="badge-pop bg-accent absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full">
       <span className="sr-only">Unread messages</span>
     </span>
   );
@@ -509,6 +511,21 @@ export function ChatTab() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const pinnedToBottom = useRef(true);
 
+  /*
+   * Messages that have been typed and are still on their way.
+   *
+   * A local list rather than an optimistic insert into the thread: the real row
+   * arrives over Realtime with its own id and timestamp, and writing a fake one
+   * into the cache would mean reconciling the two. These are drawn after the
+   * last real bubble, dimmed and with the sending dots under them, and dropped
+   * the moment the insert resolves.
+   */
+  const [sending, setSending] = useState<{ id: number; text: string }[]>([]);
+  const sendSeq = useRef(0);
+
+  /** A message arrived while the reader was scrolled back into the history. */
+  const [newBelow, setNewBelow] = useState(0);
+
   const rows = useMemo(() => render(messages, meId), [messages, meId]);
 
   // Pull reactions for whatever is on screen, including pages loaded later.
@@ -524,14 +541,37 @@ export function ChatTab() {
     const el = scrollRef.current;
     if (!el) return;
     pinnedToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    // Scrolling back down by hand answers the pill as well as tapping it does.
+    if (pinnedToBottom.current) setNewBelow(0);
   }
 
   // Re-pin on anything that changes the thread's height: a new message, and
-  // the reaction pills that arrive on a later tick.
+  // the reaction pills that arrive on a later tick. When the reader is *not*
+  // pinned, the same event is what the "New messages" pill counts.
+  const lastRowCount = useRef(rows.length);
   useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (el && pinnedToBottom.current) el.scrollTop = el.scrollHeight;
-  }, [rows.length, reactions.count]);
+    const grew = rows.length - lastRowCount.current;
+    lastRowCount.current = rows.length;
+
+    if (el && pinnedToBottom.current) {
+      el.scrollTop = el.scrollHeight;
+      return;
+    }
+    if (grew > 0) setNewBelow((n) => n + grew);
+    // `sending.length` belongs here too: a pending bubble adds height exactly
+    // like a real one, and without it your own message goes out of sight the
+    // moment you press Enter.
+  }, [rows.length, reactions.count, sending.length]);
+
+  /** The pill's job: put the reader back at the bottom and clear itself. */
+  function jumpToLatest() {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    pinnedToBottom.current = true;
+    setNewBelow(0);
+  }
 
   useEffect(() => {
     if (!loading && scrollRef.current) {
@@ -547,6 +587,7 @@ export function ChatTab() {
     if (next === conversation) return;
     setActiveId(null);
     setPendingDelete(null);
+    setNewBelow(0);
     pinnedToBottom.current = true;
     setConversation(next);
   }
@@ -567,7 +608,14 @@ export function ChatTab() {
     if (!body || !currentMember) return;
     setDraft("");
     pinnedToBottom.current = true;
+
+    // The bubble appears the instant Enter is pressed, with the dots under it,
+    // and the field is free again — which is the whole point on a thread where
+    // people send three lines in a row.
+    const id = ++sendSeq.current;
+    setSending((prev) => [...prev, { id, text: body }]);
     await sendMessage(currentMember.id, conversation, body);
+    setSending((prev) => prev.filter((p) => p.id !== id));
   }
 
   async function onFilePicked(e: React.ChangeEvent<HTMLInputElement>) {
@@ -902,9 +950,51 @@ export function ChatTab() {
                 </div>
               );
             })}
+
+            {/* Still on its way. Drawn as your own bubble, dimmed, with the
+                dots under it — so a slow connection looks like a message
+                travelling rather than a message that did not send. */}
+            {sending.map((p) => (
+              <div key={`sending:${p.id}`} className="mb-3 flex items-end justify-end gap-2">
+                <div className="flex min-w-0 max-w-[78%] flex-col items-end">
+                  <div
+                    className="chat-bubble bg-ink text-on-ink px-3.5 py-2.5 text-sm break-words whitespace-pre-wrap opacity-70 shadow-sm"
+                    style={{ borderRadius: 20, borderBottomRightRadius: 6 }}
+                  >
+                    {p.text}
+                  </div>
+                  <span className="text-faint mt-1 flex items-center gap-1.5 px-1 text-[10px]">
+                    <span className="sending-dots" aria-hidden>
+                      <span />
+                      <span />
+                      <span />
+                    </span>
+                    Sending
+                  </span>
+                </div>
+              </div>
+            ))}
           </>
         )}
       </div>
+
+      {/* A message landed while the reader was up in the history. The pill is
+          the only thing that moves — the thread itself stays exactly where it
+          was put, which is the reason not to auto-scroll in the first place. */}
+      {newBelow > 0 ? (
+        <div className="pointer-events-none relative">
+          <div className="absolute inset-x-0 -top-14 flex justify-center">
+            <button
+              onClick={jumpToLatest}
+              className="new-messages-pill bg-ink text-on-ink pointer-events-auto inline-flex items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-semibold shadow-lg"
+              aria-live="polite"
+            >
+              {newBelow} new {newBelow === 1 ? "message" : "messages"}
+              <span aria-hidden>↓</span>
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {/* ------------------------------------------------------- composer */}
       {recorder.recording ? (

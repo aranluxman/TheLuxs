@@ -6,6 +6,7 @@ import { addDays, dayKey, format, parseDayKey, todayKey } from "@/lib/dates";
 import { tint } from "@/lib/palette";
 import { formatEstimate, todoVisibleTo, type Todo } from "@/lib/types";
 import { useFamily } from "./FamilyProvider";
+import { Confetti } from "./motion/Confetti";
 import {
   Avatar,
   Button,
@@ -266,12 +267,18 @@ function EditSheet({
 function TodoRow({
   todo,
   done,
+  leaving,
+  justAdded,
   onToggle,
   onEdit,
   onRemove,
 }: {
   todo: Todo;
   done: boolean;
+  /** Ticked, and on its way down to the Done list. See `finish` in the tab. */
+  leaving?: boolean;
+  /** Just written on this device — tinted briefly so the eye finds it. */
+  justAdded?: boolean;
   onToggle: () => void;
   onEdit: () => void;
   onRemove: () => void;
@@ -284,8 +291,13 @@ function TodoRow({
   const estimate = formatEstimate(todo.estimate_minutes);
 
   return (
-    <li
-      className="tick-row group hover:bg-sunk/50 flex items-center gap-3 rounded-xl px-2 py-2.5 transition-colors"
+    // The row collapses to nothing rather than vanishing: a list that jumps
+    // when you tick something makes you look twice to check what you hit.
+    <li className="collapsible" data-open={leaving ? "false" : "true"}>
+    <div
+      className={`tick-row group hover:bg-sunk/50 flex items-center gap-3 rounded-xl px-2 py-2.5 transition-colors ${
+        justAdded ? "just-added" : ""
+      }`}
       data-done={done}
     >
       {/* Same tick as the shopping list — the interaction is identical, so it
@@ -303,12 +315,16 @@ function TodoRow({
         </span>
 
         <span className="min-w-0 flex-1">
+          {/* `strike` draws the line across rather than switching
+              `line-through` on — see the .strike rules in globals.css. It sits
+              on an inline child so the line is the width of the title, not of
+              the row; the block parent keeps the truncation. */}
           <span
             className={`tick-label block truncate text-sm ${
-              done ? "text-faint line-through" : "font-medium"
+              done ? "text-faint" : "font-medium"
             }`}
           >
-            {todo.title}
+            <span className="strike">{todo.title}</span>
           </span>
           <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs">
             {assignees.length ? (
@@ -378,6 +394,7 @@ function TodoRow({
       >
         ×
       </button>
+    </div>
     </li>
   );
 }
@@ -385,7 +402,7 @@ function TodoRow({
 /* --------------------------------------------------------------------- Tab */
 
 export function TodosTab() {
-  const { currentMember } = useFamily();
+  const { currentMember, members } = useFamily();
   const { todos, loading, error, addTodo, editTodo, setDone, removeTodo, clearDone } =
     useTodos();
 
@@ -393,6 +410,19 @@ export function TodosTab() {
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState<Todo | null>(null);
   const titleRef = useRef<HTMLInputElement>(null);
+
+  /*
+   * Tasks that have been ticked and are still collapsing out of the open list.
+   *
+   * The write goes out immediately — nothing waits on an animation, because a
+   * tap that is not yet saved when the phone goes in a pocket is a tap that
+   * never happened. This only holds the *row* in place for the third of a
+   * second it takes to fold up, after which the list below shows it as done.
+   */
+  const [leaving, setLeaving] = useState<string[]>([]);
+
+  /** The id of the task most recently added here, for the arrival highlight. */
+  const [justAdded, setJustAdded] = useState<string | null>(null);
 
   const meId = currentMember?.id ?? null;
 
@@ -404,7 +434,9 @@ export function TodosTab() {
     // courtesy, and the README says as much.
     for (const t of todos) {
       if (!todoVisibleTo(t, meId)) continue;
-      (t.done_at ? d : o).push(t);
+      // A task mid-collapse stays where it was until the fold finishes.
+      if (t.done_at && leaving.includes(t.id)) o.push(t);
+      else (t.done_at ? d : o).push(t);
     }
     // Open tasks by due date, undated last — a board is read as "what is
     // closest", and an undated task is by definition not close.
@@ -422,13 +454,20 @@ export function TodosTab() {
       done: d,
       openMinutes: o.reduce((sum, t) => sum + (t.estimate_minutes ?? 0), 0),
     };
-  }, [todos, meId]);
+  }, [todos, meId, leaving]);
+
+  /** Tick, and fold the row away. */
+  function finish(id: string) {
+    setLeaving((ids) => (ids.includes(id) ? ids : [...ids, id]));
+    void setDone(id, true, meId);
+    setTimeout(() => setLeaving((ids) => ids.filter((x) => x !== id)), 340);
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!draft.title.trim()) return;
     setSaving(true);
-    const ok = await addTodo(
+    const addedId = await addTodo(
       draft.title,
       draft.assigneeIds,
       draft.dueOn || null,
@@ -436,7 +475,10 @@ export function TodosTab() {
       estimateMinutes(draft.estimate),
     );
     setSaving(false);
-    if (ok) {
+    if (addedId) {
+      // Tinted for a moment where it landed — an added task sorts by due date,
+      // so it rarely appears at the bottom where it was typed.
+      setJustAdded(addedId);
       // The people and the estimate are left as they were: adding three jobs
       // for the same person is the common case, and re-picking them each time
       // is friction. The title and the date are per-task and are cleared.
@@ -446,6 +488,24 @@ export function TodosTab() {
   }
 
   const totalEstimate = formatEstimate(openMinutes);
+
+  /*
+   * The two lists that can be "finished", and the burst that marks it.
+   *
+   * Only when the last open task goes — not whenever the board happens to be
+   * empty — so opening the tab on a clear board is quiet.
+   */
+  const cleared = open.length === 0 && done.length > 0;
+  const [seenCleared, setSeenCleared] = useState<boolean | null>(null);
+  const [burst, setBurst] = useState(0);
+  if (!loading && seenCleared !== cleared) {
+    // The first state seen after the data lands is the baseline, never a
+    // celebration: opening a screen that was already finished is not an
+    // achievement, and the burst would then fire on every visit.
+    const firstLook = seenCleared === null;
+    setSeenCleared(cleared);
+    if (cleared && !firstLook) setBurst((n) => n + 1);
+  }
 
   return (
     <div className="space-y-6">
@@ -525,7 +585,10 @@ export function TodosTab() {
               <span className="skeleton block h-9 w-4/5 rounded-xl" />
             </div>
           ) : open.length === 0 && done.length > 0 ? (
-            <div className="tick-cleared flex flex-col items-center gap-2 px-6 py-10 text-center">
+            <div className="tick-cleared relative flex flex-col items-center gap-2 px-6 py-10 text-center">
+              {burst > 0 ? (
+                <Confetti burstKey={burst} colors={members.map((m) => m.color)} />
+              ) : null}
               <span className="bg-accent grid h-14 w-14 place-items-center rounded-full" aria-hidden>
                 <svg viewBox="0 0 24 24" className="h-7 w-7" style={{ fill: "none" }}>
                   <path
@@ -551,13 +614,17 @@ export function TodosTab() {
               hint="Add one above and it shows up on everyone's phone."
             />
           ) : (
-            <ul className="p-2">
+            /* The skeleton above hands over to the real list with a fade
+               rather than a swap — see `.reveal`. */
+            <ul className="reveal p-2">
               {open.map((t) => (
                 <TodoRow
                   key={t.id}
+                  justAdded={t.id === justAdded}
                   todo={t}
                   done={false}
-                  onToggle={() => void setDone(t.id, true, meId)}
+                  onToggle={() => finish(t.id)}
+                  leaving={leaving.includes(t.id)}
                   onEdit={() => setEditing(t)}
                   onRemove={() => void removeTodo(t.id)}
                 />

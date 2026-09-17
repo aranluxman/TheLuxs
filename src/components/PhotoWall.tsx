@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { usePhotos } from "@/hooks/usePhotos";
 import { format, parseISO } from "@/lib/dates";
 import type { PhotoWithUrl } from "@/lib/types";
@@ -19,16 +19,61 @@ import { Avatar, Button, Card, ErrorNote, SectionTitle } from "./ui";
 
 function Lightbox({
   photo,
+  from,
   onClose,
   onDelete,
 }: {
   photo: PhotoWithUrl;
+  /**
+   * Where the photo was on screen when it was tapped, in viewport coordinates.
+   *
+   * This is the F and the I of FLIP: the opened image is drawn at its final
+   * size, then immediately transformed *back* onto the thumbnail's box and
+   * released, so it appears to grow out of the photo that was tapped rather
+   * than fading in over it. Null when it was opened some other way (a keyboard
+   * activation with no rect to read), in which case it just scales up in place.
+   */
+  from: DOMRect | null;
   onClose: () => void;
   onDelete: () => void;
 }) {
   const { byId } = useFamily();
   const uploader = photo.uploaded_by ? byId[photo.uploaded_by] : null;
   const closeRef = useRef<HTMLButtonElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
+
+  /*
+   * The invert-and-play half. Runs in a layout effect so the transform is in
+   * place before the browser paints — a frame of the full-size image at full
+   * size is exactly the jump this exists to avoid.
+   */
+  useLayoutEffect(() => {
+    const el = imgRef.current;
+    if (!el || !from) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+    const to = el.getBoundingClientRect();
+    if (!to.width || !to.height) return;
+
+    const dx = from.left + from.width / 2 - (to.left + to.width / 2);
+    const dy = from.top + from.height / 2 - (to.top + to.height / 2);
+    const scale = Math.max(0.05, from.width / to.width);
+
+    el.style.transformOrigin = "center";
+    el.style.transform = `translate(${dx}px, ${dy}px) scale(${scale})`;
+    el.style.opacity = "0.6";
+
+    // Two frames: one to commit the inverted position, one to release it.
+    const raf = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        el.style.transition =
+          "transform 360ms cubic-bezier(0.16, 1, 0.3, 1), opacity 260ms ease";
+        el.style.transform = "";
+        el.style.opacity = "";
+      });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [from, photo.url]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -75,6 +120,7 @@ function Lightbox({
         {photo.url ? (
           /* eslint-disable-next-line @next/next/no-img-element */
           <img
+            ref={imgRef}
             src={photo.url}
             alt={photo.caption ?? "Family photo"}
             className="max-h-[70vh] w-full rounded-xl object-contain"
@@ -118,7 +164,8 @@ function Carousel({
   onOpen,
 }: {
   photos: PhotoWithUrl[];
-  onOpen: (p: PhotoWithUrl) => void;
+  /** The rect is the thumbnail's box, for the viewer to grow out of. */
+  onOpen: (p: PhotoWithUrl, rect: DOMRect | null) => void;
 }) {
   const { byId } = useFamily();
   const [index, setIndex] = useState(0);
@@ -152,6 +199,9 @@ function Carousel({
   return (
     <div
       className="photo-carousel aspect-[4/3] w-full sm:aspect-[16/9]"
+      // The same flag that stops the advance stops the drift: someone looking
+      // closely should get a still photo, not one still creeping away.
+      data-paused={paused ? "true" : undefined}
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
       onFocusCapture={() => setPaused(true)}
@@ -165,16 +215,23 @@ function Carousel({
       <button
         key={photo.id}
         type="button"
-        onClick={() => onOpen(photo)}
+        onClick={(e) => onOpen(photo, e.currentTarget.getBoundingClientRect())}
         className="photo-carousel-slide absolute inset-0 block h-full w-full"
         aria-label={photo.caption ? `Open: ${photo.caption}` : "Open this photo"}
       >
         {photo.url ? (
+          /*
+           * Ken Burns: a slow push in, drifting a little, over the twelve
+           * seconds a photo can be on screen. The direction alternates with
+           * the index so two photos in a row never pan the same way, which is
+           * what stops it reading as a broken zoom.
+           */
           /* eslint-disable-next-line @next/next/no-img-element */
           <img
             src={photo.url}
             alt={photo.caption ?? "Family photo"}
-            className="h-full w-full object-cover"
+            className="ken-burns h-full w-full object-cover"
+            data-direction={safeIndex % 2 === 1 ? "reverse" : undefined}
             decoding="async"
           />
         ) : (
@@ -249,6 +306,8 @@ export function PhotoWall() {
 
   const [dragging, setDragging] = useState(false);
   const [open, setOpen] = useState<PhotoWithUrl | null>(null);
+  /** Where the photo was when it was opened, so the viewer can grow from it. */
+  const [openedFrom, setOpenedFrom] = useState<DOMRect | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
 
@@ -348,7 +407,11 @@ export function PhotoWall() {
           </div>
         ) : empty ? (
           <div className="border-line flex flex-col items-center gap-3 rounded-lg border border-dashed px-6 py-10 text-center">
-            <span className="bg-accent-soft grid h-12 w-12 place-items-center rounded-xl text-2xl" aria-hidden>
+            {/* Drifting, like something waiting to be filled. */}
+            <span
+              className="float-idle bg-accent-soft grid h-12 w-12 place-items-center rounded-xl text-2xl"
+              aria-hidden
+            >
               🖼️
             </span>
             <p className="text-sm font-medium">No photos on the wall yet</p>
@@ -361,13 +424,20 @@ export function PhotoWall() {
             </Button>
           </div>
         ) : (
-          <Carousel photos={photos} onOpen={setOpen} />
+          <Carousel
+            photos={photos}
+            onOpen={(p, rect) => {
+              setOpenedFrom(rect);
+              setOpen(p);
+            }}
+          />
         )}
       </Card>
 
       {open ? (
         <Lightbox
           photo={open}
+          from={openedFrom}
           onClose={() => setOpen(null)}
           onDelete={() => {
             void removePhoto(open.id);

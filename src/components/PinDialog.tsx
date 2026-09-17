@@ -40,6 +40,23 @@ export function PinDialog({
   const [localError, setLocalError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  /*
+   * The shake, and the dots emptying behind it.
+   *
+   * Driven off the *message* rather than off the input: a rejection arrives as
+   * new error text, and the same wrong PIN typed twice has to shake twice, so
+   * the run is keyed by a counter that only ever goes up. Nothing here reads
+   * or holds a digit — the dots below count characters in the field and know
+   * nothing else about them.
+   */
+  const [shakeKey, setShakeKey] = useState(0);
+  const [lastMessage, setLastMessage] = useState<string | null>(null);
+  const shownError = localError ?? error;
+  if (shownError !== lastMessage) {
+    setLastMessage(shownError);
+    if (shownError) setShakeKey((n) => n + 1);
+  }
+
   // No state is reset here. ProfileGate keys this component on the member and
   // mode, so a different person or purpose remounts it with fresh state —
   // which is what React's `key` is for, and avoids a cascading render.
@@ -99,13 +116,30 @@ export function PinDialog({
     <Modal open={open} onClose={busy ? () => {} : onClose} title={heading}>
       <div className="flex flex-col items-center text-center">
         <span
-          className="mb-3 grid h-16 w-16 place-items-center rounded-full text-3xl"
+          className={`mb-3 grid h-16 w-16 place-items-center rounded-full text-3xl ${
+            busy ? "pin-unlocked" : ""
+          }`}
           style={{ backgroundColor: tint(member.color, 0.16) }}
         >
           {member.avatar_url ? <Avatar member={member} size="lg" /> : member.avatar_emoji}
         </span>
 
         <p className="text-muted mb-5 max-w-xs text-sm">{blurb}</p>
+
+        {/* Four dots above the field, filling as it fills. The field itself is
+            masked, so without these there is no feedback at all that a tap
+            registered — and on a phone keyboard that is the difference between
+            typing a PIN and wondering whether the screen is frozen. Purely a
+            mirror of how many characters are in the box. */}
+        <span
+          key={shakeKey}
+          className={`pin-dots mb-4 ${shownError ? "pin-shake" : ""}`}
+          aria-hidden
+        >
+          {[0, 1, 2, 3].map((i) => (
+            <span key={i} className="pin-dot" data-filled={i < value.length ? "true" : undefined} />
+          ))}
+        </span>
 
         <label htmlFor="pin-field" className="sr-only">
           {creating && stage === "confirm" ? "Confirm the four-digit PIN" : "Four-digit PIN"}

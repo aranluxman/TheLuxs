@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useProfileLock } from "@/hooks/useProfileLock";
 import { tint } from "@/lib/palette";
 import type { MemberWithPhoto } from "@/lib/types";
+import { Orbit } from "./motion/Orbit";
+import { Reveal } from "./motion/Reveal";
 import { useFamily } from "./FamilyProvider";
 import { PinDialog, type PinMode } from "./PinDialog";
 import { ErrorNote } from "./ui";
@@ -99,7 +101,14 @@ export function ProfileGate() {
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col justify-center px-5 py-10 sm:py-16">
       <div className="mx-auto max-w-md text-center">
-        <div className="brand-mark mx-auto mb-5" aria-hidden>F</div>
+        {/* Everyone in the house, slowly circling home. Decorative — the
+            picker below says all of it in words — and the first thing the
+            screen does, because this is the one page nobody is in a hurry on. */}
+        <Orbit
+          members={members}
+          center={<span className="brand-mark !h-11 !w-11 text-base">F</span>}
+        />
+
         <p className="text-accent text-[11px] font-bold tracking-[0.14em] uppercase">Welcome home</p>
         <h1 className="mt-2 text-3xl font-bold tracking-tight">Who&rsquo;s using this?</h1>
         <p className="text-muted mt-2 text-center text-sm">
@@ -110,20 +119,23 @@ export function ProfileGate() {
       <ErrorNote message={lock.error} />
 
       <div className="mt-9 grid grid-cols-2 gap-3 sm:grid-cols-3">
-        {members.map((m) => {
+        {members.map((m, i) => {
           const hasPin = lock.status[m.id]?.has_pin ?? false;
           const isChecking = checking === m.id;
           return (
+            // 70ms apart: enough for the eye to follow along the row, short
+            // enough that the last face is in before anyone has decided.
+            <Reveal key={m.id} delay={i * 70}>
             <button
-              key={m.id}
               onClick={() => void choose(m)}
               disabled={isChecking || lock.loading}
+              style={{ "--profile-hue": m.color } as React.CSSProperties}
               aria-label={
                 hasPin
                   ? `${m.name}. Protected by a PIN.`
                   : `${m.name}. No PIN yet — you will be asked to create one.`
               }
-              className="dashboard-card border-line bg-surface relative flex min-h-36 flex-col items-center justify-center gap-3 rounded-2xl border p-5 transition-transform hover:-translate-y-1 disabled:opacity-60"
+              className="dashboard-card profile-card border-line bg-surface relative flex h-full min-h-36 w-full flex-col items-center justify-center gap-3 rounded-2xl border p-5 disabled:opacity-60"
             >
               {m.avatar_url ? (
                 <span className="h-16 w-16 overflow-hidden rounded-full">
@@ -143,10 +155,14 @@ export function ProfileGate() {
 
               {/* A profile with no PIN is called out, so the household can see
                   at a glance who still needs to set one. */}
-              <span className="text-faint absolute top-2.5 right-3 text-[10px] font-semibold" aria-hidden>
+              <span
+                className="profile-lock text-faint absolute top-2.5 right-3 inline-block text-[10px] font-semibold"
+                aria-hidden
+              >
                 {isChecking ? "…" : hasPin ? "🔒" : "Set a PIN"}
               </span>
             </button>
+            </Reveal>
           );
         })}
       </div>

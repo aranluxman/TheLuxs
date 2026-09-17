@@ -117,8 +117,25 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   // `color-scheme` and the `dark:` variant key on — see `globals.css`.
   useEffect(() => {
     const root = document.documentElement;
+    const changing = root.getAttribute("data-theme") !== theme.id;
+
     root.setAttribute("data-theme", theme.id);
     root.setAttribute("data-mode", theme.mode);
+
+    /*
+     * A palette swap is a redraw of every surface at once, and instantly it
+     * reads as a flicker rather than a choice. `data-theming` turns on a short
+     * colour transition across the tree (see `globals.css`) and is taken off
+     * again immediately afterwards — leaving it on would put a 300ms lag behind
+     * every hover and every tick in the app.
+     *
+     * Skipped on the first run, where there is nothing to cross-fade from: the
+     * bootstrap script has already painted these colours.
+     */
+    if (!changing) return;
+    root.setAttribute("data-theming", "");
+    const id = setTimeout(() => root.removeAttribute("data-theming"), 420);
+    return () => clearTimeout(id);
   }, [theme]);
 
   // The browser chrome (iOS status bar, Android address bar) reads this, and
