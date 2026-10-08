@@ -10,18 +10,14 @@ import {
 import {
   CADENCES,
   CHORES,
-  POINTS_AVAILABLE_PER_WEEK,
   cadenceMeta,
   chorePoints,
   type ChoreDefinition,
 } from "@/lib/chores";
 import {
-  addDays,
-  format,
   formatDayLabel,
   formatTime,
   parseISO,
-  startOfWeekMon,
 } from "@/lib/dates";
 import { tint } from "@/lib/palette";
 import type { ChoreTick, MemberWithPhoto } from "@/lib/types";
@@ -81,7 +77,7 @@ function useStandings(scores: Record<string, number>): Standing[] {
   }, [members, scores]);
 }
 
-function Leaderboard({ scores }: { scores: Record<string, number> }) {
+function Leaderboard({ scores, year }: { scores: Record<string, number>; year: number }) {
   const standings = useStandings(scores);
   // The bars are the whole point of the panel, so they grow when somebody is
   // actually looking at them rather than while the tab is still painting.
@@ -90,19 +86,15 @@ function Leaderboard({ scores }: { scores: Record<string, number> }) {
   const top = standings[0]?.points ?? 0;
   const leaders = standings.filter((s) => s.leader);
 
-  const weekStart = startOfWeekMon(new Date());
-  const weekLabel = `${format(weekStart, "MMM d")} – ${format(addDays(weekStart, 6), "MMM d")}`;
-
   return (
     <Card className="glass-panel overflow-hidden">
       <div className="border-line flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b px-4 py-3">
         <div>
-          <h3 className="text-sm font-bold tracking-tight">This week&rsquo;s leaderboard</h3>
-          <p className="text-faint text-[11px]">{weekLabel} · resets Monday</p>
+          <h3 className="text-sm font-bold tracking-tight">This year&rsquo;s leaderboard</h3>
+          <p className="text-faint text-[11px]">{year} · resets January 1</p>
         </div>
         <p className="text-muted text-xs tabular-nums">
-          <CountUp value={total} className="text-accent font-bold" /> of{" "}
-          {POINTS_AVAILABLE_PER_WEEK} points claimed
+          <CountUp value={total} className="text-accent font-bold" /> points claimed
         </p>
       </div>
 
@@ -126,9 +118,7 @@ function Leaderboard({ scores }: { scores: Record<string, number> }) {
 
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-semibold">{s.member.name}</span>
-              {/* A bar against the leader's score, not against the weekly
-                  maximum: the question on a scoreboard is "how far behind am
-                  I", and against 31 every real score is a sliver. */}
+              {/* Each bar shows how close this member is to the leader. */}
               {/* Scaled rather than widened: `width` is a layout property and
                   five of them animating at once is five reflows a frame, where
                   a transform is handed straight to the compositor. */}
@@ -157,18 +147,18 @@ function Leaderboard({ scores }: { scores: Record<string, number> }) {
 
       <p className="text-muted border-line border-t px-4 py-2.5 text-xs">
         {total === 0 ? (
-          <>No points yet this week — first chore done takes the lead.</>
+          <>No points yet this year — first chore done takes the lead.</>
         ) : leaders.length === 1 ? (
           <>
             <strong className="text-ink font-semibold">{leaders[0].member.name}</strong> has
-            the most points this week.
+            the most points this year.
           </>
         ) : (
           <>
             <strong className="text-ink font-semibold">
               {leaders.map((l) => l.member.name).join(" and ")}
             </strong>{" "}
-            are tied for the most points this week.
+            are tied for the most points this year.
           </>
         )}
       </p>
@@ -482,7 +472,7 @@ function History() {
 
 export function ChoresTab() {
   const { members } = useFamily();
-  const { ticksFor, toggleMember, scores, progress, loading, error } = useChores();
+  const { ticksFor, toggleMember, scores, progress, period, loading, error } = useChores();
 
   const pct = progress.total === 0 ? 0 : Math.round((progress.done / progress.total) * 100);
 
@@ -516,8 +506,8 @@ export function ChoresTab() {
         </p>
         <h2 className="mt-1 text-2xl font-bold tracking-tight">Chore board</h2>
         <p className="text-muted mt-0.5 text-sm">
-          Nothing is assigned. Do a chore, tap your name, take the points — most points
-          by Sunday night wins the week. Some jobs are worth two, and the ones done
+          Nothing is assigned. Do a chore, tap your name, take the points. Points
+          accumulate throughout the year and reset on January 1. Some jobs are worth two, and the ones done
           several times a day take as many names as helped.
         </p>
       </div>
@@ -532,7 +522,7 @@ export function ChoresTab() {
         </div>
       ) : (
         <>
-          <Leaderboard scores={scores} />
+          <Leaderboard scores={scores} year={period.year} />
 
           {/* ------------------------------------------------------ progress */}
           <div>

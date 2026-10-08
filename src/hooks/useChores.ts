@@ -7,7 +7,8 @@ import {
   chorePoints,
   type ChoreDefinition,
 } from "@/lib/chores";
-import { todayKey, weekDayKeys, weekKey } from "@/lib/dates";
+import { todayKey, weekKey } from "@/lib/dates";
+import { annualChoreScores, choreYearWindow } from "@/lib/choreScores";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
 import type { ChoreTick } from "@/lib/types";
 
@@ -28,12 +29,14 @@ interface Period {
   day: string;
   /** This ISO week, for the weekend chores. */
   week: string;
-  /** All seven days of this week — the scoring window. */
-  days: string[];
+  /** Calendar-year scoring window, independent of ISO weeks. */
+  year: number;
+  start: string;
+  end: string;
 }
 
 function currentPeriod(): Period {
-  return { day: todayKey(), week: weekKey(), days: weekDayKeys() };
+  return { day: todayKey(), week: weekKey(), ...choreYearWindow() };
 }
 
 /** The period a chore's tick is filed under, given its cadence. */
@@ -42,13 +45,10 @@ export function periodKeyFor(chore: ChoreDefinition, period: Period): string {
 }
 
 /**
- * The chore board and this week's scores.
- *
- * A whole week of ticks is loaded, not just today's, because the leaderboard
- * is the point of the feature and a daily chore's ticks are filed one per day
- * — Monday's sweep and Friday's sweep are different rows. Eight period keys
- * (seven days plus the week) cover every point available, and that is still a
- * tiny query: the ceiling is a row per chore per person per day.
+ * The chore board and calendar-year scores. Daily and weekend cards keep
+ * their own periods; accumulated points start fresh every January 1.
+ * Current-week weekend ticks are also loaded across the year boundary so
+ * those cards retain their completion state without scoring last year's work.
  *
  * Since migration 0016 a chore can carry several sign-ups in one period —
  * the dishes get washed three times a day and rarely by the same person — so
@@ -75,28 +75,31 @@ export function useChores(ready = true) {
     return () => clearInterval(id);
   }, []);
 
-  // One string, so the effects below depend on a primitive rather than on an
-  // array that is a fresh object every time the clock is read.
-  const windowKeys = useMemo(
-    () => [...period.days, period.week],
-    [period.days, period.week],
-  );
-  const windowId = windowKeys.join(",");
-
+  const { start, end, week } = period;
   const load = useCallback(async () => {
     if (!isSupabaseConfigured) return;
-    const { data, error: err } = await getSupabase()
-      .from("family_chore_ticks")
-      .select("*")
-      .in("period_key", windowId.split(","));
-
-    if (err) setError(err.message);
-    else {
-      setTicks((data ?? []) as ChoreTick[]);
-      setError(null);
+    const rows: ChoreTick[] = [];
+    const pageSize = 1000;
+    // Paginate: a busy household can exceed the API's default row limit.
+    for (let offset = 0; ; offset += pageSize) {
+      const { data, error: err } = await getSupabase()
+        .from("family_chore_ticks")
+        .select("*")
+        .or(`and(done_at.gte.${start},done_at.lt.${end}),period_key.eq.${week}`)
+        .order("id")
+        .range(offset, offset + pageSize - 1);
+      if (err) {
+        setError(err.message);
+        setLoading(false);
+        return;
+      }
+      rows.push(...((data ?? []) as ChoreTick[]));
+      if (!data || data.length < pageSize) break;
     }
+    setTicks(rows);
+    setError(null);
     setLoading(false);
-  }, [windowId]);
+  }, [start, end, week]);
 
   useEffect(() => {
     if (!ready) return;
@@ -111,13 +114,17 @@ export function useChores(ready = true) {
 
   useEffect(() => {
     if (!isSupabaseConfigured || !ready) return;
-    const inWindow = new Set(windowId.split(","));
+    const inWindow = (row: ChoreTick) =>
+      row.period_key === week || (row.done_at >= start && row.done_at < end);
     const supabase = getSupabase();
 
     const upsertLocal = (row: ChoreTick) => {
       // A tick for a period this device is not showing — most likely the
       // rollover reached another phone first — is not ours to render.
-      if (!inWindow.has(row.period_key)) return;
+      if (!inWindow(row)) {
+        setTicks((prev) => prev.filter((tick) => tick.id !== row.id));
+        return;
+      }
       setTicks((prev) => {
         const i = prev.findIndex((t) => t.id === row.id);
         if (i === -1) return [...prev, row];
@@ -156,7 +163,7 @@ export function useChores(ready = true) {
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [ready, windowId]);
+  }, [ready, start, end, week]);
 
   /** Everyone signed up for a chore in its *current* period, oldest first. */
   const ticksFor = useCallback(
@@ -277,19 +284,10 @@ export function useChores(ready = true) {
     [ticks, period],
   );
 
-  /**
-   * Points per member for this week, weighted: a tick is worth whatever was
-   * stamped on it, so mopping counts double and a re-worded roster never
-   * re-scores the past. Ticks whose owner has since left the family carry a
-   * null `done_by` and score for nobody.
-   */
-  const scores = useMemo(() => {
-    const out: Record<string, number> = {};
-    for (const t of ticks) {
-      if (t.done_by) out[t.done_by] = (out[t.done_by] ?? 0) + (t.points ?? 1);
-    }
-    return out;
-  }, [ticks]);
+  const scores = useMemo(
+    () => annualChoreScores(ticks, start, end),
+    [ticks, start, end],
+  );
 
   /** How much of what is on screen right now has at least one name on it. */
   const progress = useMemo(() => {
