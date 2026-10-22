@@ -8,6 +8,7 @@ import {
   themeById,
 } from "@/lib/themes";
 import { APP_ICON_CACHE_KEY } from "@/lib/appIcon";
+import { MEMBER_STORAGE_KEY } from "@/lib/member";
 import "./globals.css";
 
 /**
@@ -23,6 +24,9 @@ const inter = Inter({
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
+  // Only a couple of code snippets use it, so it is fetched when one renders
+  // instead of competing with Inter on the first load.
+  preload: false,
 });
 
 export const metadata: Metadata = {
@@ -56,8 +60,8 @@ export const viewport: Viewport = {
   themeColor: themeById(SYSTEM_LIGHT).chrome,
   width: "device-width",
   initialScale: 1,
-  // The chat input should not zoom the page on iOS.
-  maximumScale: 1,
+  // No `maximumScale`: pinch-zoom has to stay available for low-vision users.
+  // iOS only auto-zooms into inputs under 16px, which globals.css rules out.
 };
 
 /**
@@ -92,6 +96,14 @@ const NO_FLASH_SCRIPT = `
   root.setAttribute("data-theme", choice);
   root.setAttribute("data-mode", MODES[choice]);
 
+  // A device that has already picked a person skips the picker, so it gets the
+  // dashboard skeleton while loading instead of the picker's heading.
+  try {
+    if (localStorage.getItem(${JSON.stringify(MEMBER_STORAGE_KEY)})) {
+      root.setAttribute("data-returning", "");
+    }
+  } catch (e) {}
+
   // The household's own icon, straight from the cache. React swaps in the
   // shared copy once it has one; this is only so the tab does not show the
   // default mark for a second first.
@@ -117,6 +129,10 @@ const NO_FLASH_SCRIPT = `
 })();
 `;
 
+const SUPABASE_ORIGIN = process.env.NEXT_PUBLIC_SUPABASE_URL
+  ? new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).origin
+  : null;
+
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
@@ -125,6 +141,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       suppressHydrationWarning
     >
       <head>
+        {/* The first thing the page does is ask Supabase who lives here, so
+            the connection is opened while the scripts are still downloading. */}
+        {SUPABASE_ORIGIN && <link rel="preconnect" href={SUPABASE_ORIGIN} crossOrigin="anonymous" />}
         <script dangerouslySetInnerHTML={{ __html: NO_FLASH_SCRIPT }} />
       </head>
       <body className="bg-canvas text-ink flex min-h-full flex-col">{children}</body>

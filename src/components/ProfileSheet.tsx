@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { downscaleImage } from "@/lib/image";
+import { AVATAR_EDGE, downscaleImage } from "@/lib/image";
 import { MEMBER_COLORS, MEMBER_EMOJI } from "@/lib/palette";
 import { useFamily } from "./FamilyProvider";
 import { Avatar, Button, ErrorNote, Field, Modal, inputClass } from "./ui";
@@ -29,7 +29,7 @@ export function ProfileSheet({ open, onClose }: { open: boolean; onClose: () => 
 
     setError(null);
     setBusy(true);
-    const shrunk = await downscaleImage(file, 640);
+    const shrunk = await downscaleImage(file, AVATAR_EDGE, 0.82);
     const err = await setMemberPhoto(target.id, shrunk);
     if (err) setError(err);
     setBusy(false);

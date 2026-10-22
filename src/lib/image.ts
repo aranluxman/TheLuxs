@@ -1,4 +1,11 @@
 /**
+ * Longest edge for a profile photo. The biggest place one is drawn is ~130 CSS
+ * pixels, so 256 covers a 2x screen and keeps each avatar around 15 KB — the
+ * picker loads every one of them before it looks finished.
+ */
+export const AVATAR_EDGE = 256;
+
+/**
  * Downscales a picked photo before upload. A phone camera shot is several
  * megabytes; an avatar is displayed at 56px. Shrinking client-side keeps the
  * bucket small and makes the chat load quickly on mobile data.

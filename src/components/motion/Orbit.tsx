@@ -73,6 +73,8 @@ export function Orbit({
                     src={m.avatar_url}
                     alt=""
                     className="h-full w-full rounded-full object-cover"
+                    decoding="async"
+                    fetchPriority="low"
                   />
                 ) : (
                   <span className="orbit-initial" style={{ color: m.color }}>

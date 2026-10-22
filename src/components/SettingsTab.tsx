@@ -8,7 +8,7 @@ import {
 } from "@/hooks/useMessageNotifications";
 import { usePrefs } from "@/hooks/usePrefs";
 import { useProfileLock } from "@/hooks/useProfileLock";
-import { downscaleImage } from "@/lib/image";
+import { AVATAR_EDGE, downscaleImage } from "@/lib/image";
 import { MEMBER_COLORS } from "@/lib/palette";
 import {
   CALENDAR_VIEWS,
@@ -326,7 +326,7 @@ function ProfileBlock() {
     if (!file) return;
     setError(null);
     setBusy(true);
-    setError(await setMemberPhoto(me.id, await downscaleImage(file, 640)));
+    setError(await setMemberPhoto(me.id, await downscaleImage(file, AVATAR_EDGE, 0.82)));
     setBusy(false);
   }
 

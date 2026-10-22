@@ -356,6 +356,26 @@ html {
   transition: max-width 320ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+/*
+ * The viewport no longer forbids zooming, which was the only thing stopping iOS
+ * Safari from zooming into a focused field. It does that for anything under
+ * 16px, so on touch screens fields never go below it.
+ */
+@media (pointer: coarse) {
+  input,
+  textarea,
+  select {
+    font-size: max(1rem, 16px);
+  }
+}
+
+/* Which loading state is shown is decided by the `data-returning` flag the
+   layout's inline script puts on <html> before first paint. */
+html[data-returning] .gate-first-visit,
+html:not([data-returning]) .gate-returning {
+  display: none;
+}
+
 button,
 a,
 input,

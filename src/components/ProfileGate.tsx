@@ -11,6 +11,31 @@ import { PinDialog, type PinMode } from "./PinDialog";
 import { ErrorNote } from "./ui";
 
 /**
+ * The heading block of the picker. Shared with the loading state in App.tsx:
+ * this text is the largest thing on the first screen, and it has to be in the
+ * prerendered HTML rather than waiting on the member list to arrive.
+ */
+export function GateIntro({ orbit }: { orbit: React.ReactNode }) {
+  return (
+    <div className="mx-auto max-w-md text-center">
+      {orbit}
+      <p className="text-accent text-[11px] font-bold tracking-[0.14em] uppercase">Welcome home</p>
+      <h1 className="mt-2 text-3xl font-bold tracking-tight">Who&rsquo;s using this?</h1>
+      <p className="text-muted mt-2 text-center text-sm">
+        Pick your name and enter your PIN. This device will remember you afterwards.
+      </p>
+    </div>
+  );
+}
+
+/** The wrapper both the picker and its loading state sit in. */
+export const GATE_LAYOUT =
+  "mx-auto flex w-full max-w-2xl flex-1 flex-col justify-center px-5 py-10 sm:py-16";
+
+/** Same grid as the picker, so the faces land where the placeholders were. */
+export const GATE_GRID = "mt-9 grid grid-cols-2 gap-3 sm:grid-cols-3";
+
+/**
  * "Who's using this?" — now with a PIN in front of each profile.
  *
  * Three ways a tap can go:
@@ -48,6 +73,10 @@ export function ProfileGate() {
     async (member: MemberWithPhoto) => {
       setPinError(null);
       setLockedFor(null);
+
+      // Warm the dashboard's code while they type a PIN, so getting in is not
+      // a second wait. It is split out of the first load for exactly this.
+      void import("./Shell");
 
       const hasPin = lock.status[member.id]?.has_pin ?? false;
       if (!hasPin) {
@@ -99,26 +128,22 @@ export function ProfileGate() {
   }
 
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col justify-center px-5 py-10 sm:py-16">
-      <div className="mx-auto max-w-md text-center">
-        {/* Everyone in the house, slowly circling home. Decorative — the
-            picker below says all of it in words — and the first thing the
-            screen does, because this is the one page nobody is in a hurry on. */}
-        <Orbit
-          members={members}
-          center={<span className="brand-mark !h-11 !w-11 text-base">F</span>}
-        />
-
-        <p className="text-accent text-[11px] font-bold tracking-[0.14em] uppercase">Welcome home</p>
-        <h1 className="mt-2 text-3xl font-bold tracking-tight">Who&rsquo;s using this?</h1>
-        <p className="text-muted mt-2 text-center text-sm">
-          Pick your name and enter your PIN. This device will remember you afterwards.
-        </p>
-      </div>
+    <main className={GATE_LAYOUT}>
+      {/* Everyone in the house, slowly circling home. Decorative — the
+          picker below says all of it in words — and the first thing the
+          screen does, because this is the one page nobody is in a hurry on. */}
+      <GateIntro
+        orbit={
+          <Orbit
+            members={members}
+            center={<span className="brand-mark !h-11 !w-11 text-base">F</span>}
+          />
+        }
+      />
 
       <ErrorNote message={lock.error} />
 
-      <div className="mt-9 grid grid-cols-2 gap-3 sm:grid-cols-3">
+      <div className={GATE_GRID}>
         {members.map((m, i) => {
           const hasPin = lock.status[m.id]?.has_pin ?? false;
           const isChecking = checking === m.id;
@@ -140,7 +165,13 @@ export function ProfileGate() {
               {m.avatar_url ? (
                 <span className="h-16 w-16 overflow-hidden rounded-full">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={m.avatar_url} alt="" className="h-full w-full object-cover" loading="lazy" />
+                  <img
+                    src={m.avatar_url}
+                    alt=""
+                    className="h-full w-full object-cover"
+                    loading="lazy"
+                    decoding="async"
+                  />
                 </span>
               ) : (
                 <span

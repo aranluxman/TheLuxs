@@ -8,11 +8,11 @@ import {
   useMemo,
   useState,
 } from "react";
+import { MEMBER_STORAGE_KEY } from "@/lib/member";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
 import { removeMedia, signMediaUrls, uploadMedia } from "@/lib/storage";
 import type { FamilyMember, MemberWithPhoto } from "@/lib/types";
 
-const STORAGE_KEY = "family-dashboard:member-id";
 
 interface FamilyContextValue {
   members: MemberWithPhoto[];
@@ -43,7 +43,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   const [currentId, setCurrentId] = useState<string | null>(() => {
     if (typeof window === "undefined") return null;
     try {
-      return window.localStorage.getItem(STORAGE_KEY);
+      return window.localStorage.getItem(MEMBER_STORAGE_KEY);
     } catch {
       // Private mode / storage disabled — the picker just shows every time.
       return null;
@@ -97,8 +97,8 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   const setCurrentMemberId = useCallback((id: string | null) => {
     setCurrentId(id);
     try {
-      if (id) window.localStorage.setItem(STORAGE_KEY, id);
-      else window.localStorage.removeItem(STORAGE_KEY);
+      if (id) window.localStorage.setItem(MEMBER_STORAGE_KEY, id);
+      else window.localStorage.removeItem(MEMBER_STORAGE_KEY);
     } catch {
       // Non-fatal: the choice just will not survive a reload.
     }
