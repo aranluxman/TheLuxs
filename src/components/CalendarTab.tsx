@@ -54,11 +54,10 @@ type RangeId = (typeof RANGES)[number]["id"];
 
 /**
  * Days of agenda shown before the Load more button, and how many each press
- * adds. Counted in *days that have something on them* rather than calendar
- * days: a run of empty days renders nothing, so paging by calendar date would
- * hand back a button that reveals blank space.
+ * adds. Every calendar day in the range gets a section, empty or not, so this
+ * is counted in plain days — a week at a time.
  */
-const DAYS_PER_PAGE = 3;
+const DAYS_PER_PAGE = 7;
 
 /** `null` is the "Everyone" tab. */
 type PersonFilter = string | null;
@@ -652,15 +651,16 @@ export function CalendarTab({ unreadCount = 0 }: { unreadCount?: number }) {
   }, [agenda, person]);
 
   const byDay = useMemo(() => {
+    // Seeded with every day in the window so a day with nothing on it still
+    // gets a section, rather than the list silently jumping from Monday to
+    // Wednesday. Insertion order is chronological.
     const map = new Map<string, AgendaItem[]>();
-    for (const i of visible) {
-      const bucket = map.get(i.day);
-      if (bucket) bucket.push(i);
-      else map.set(i.day, [i]);
-    }
-    // `visible` is already sorted by day, so insertion order is chronological.
+    const first = parseDayKey(fromKey);
+    for (let n = 0; n <= days; n++) map.set(dayKey(addDays(first, n)), []);
+    // `visible` is already sorted by day, so each bucket stays in time order.
+    for (const i of visible) map.get(i.day)?.push(i);
     return [...map.entries()];
-  }, [visible]);
+  }, [visible, fromKey, days]);
 
   // A different person or range is a different question, so it is answered
   // from the top rather than from however far the previous one was expanded.
@@ -903,7 +903,7 @@ export function CalendarTab({ unreadCount = 0 }: { unreadCount?: number }) {
             Tap anything to see the full details.
           </p>
         </div>
-      ) : byDay.length === 0 ? (
+      ) : visible.length === 0 ? (
 
         <Card>
           <EmptyState
@@ -939,14 +939,21 @@ export function CalendarTab({ unreadCount = 0 }: { unreadCount?: number }) {
                 >
                   <h3 className="text-sm font-semibold">{formatDayLabel(date)}</h3>
                   <span className="text-faint text-xs">{format(date, "MMM d")}</span>
-                  <span className="text-faint ml-auto text-xs tabular-nums">
-                    {items.length}
-                  </span>
+                  {items.length > 0 ? (
+                    <span className="text-faint ml-auto text-xs tabular-nums">
+                      {items.length}
+                    </span>
+                  ) : null}
                 </div>
                 <Card className={dayIndex < 4 ? "reveal" : ""}
                   style={dayIndex < 4 ? { animationDelay: `${dayIndex * 60}ms` } : undefined}
                 >
-                  <ul className="p-2">
+                  {items.length === 0 ? (
+                    <p className="text-faint px-4 py-3.5 text-sm">
+                      Nothing for today. No scheduled events.
+                    </p>
+                  ) : null}
+                  <ul className={items.length > 0 ? "p-2" : undefined}>
                     {items.map((i) => (
                       <AgendaRow
                         key={i.id}
@@ -969,7 +976,7 @@ export function CalendarTab({ unreadCount = 0 }: { unreadCount?: number }) {
               // ("Load more5 more days"), so the spoken name is set here.
               aria-label={`Load more. ${hiddenDayCount} more ${
                 hiddenDayCount === 1 ? "day" : "days"
-              } with something scheduled.`}
+              }.`}
             >
               Load more
               <span className="text-muted ml-1.5 font-medium">
