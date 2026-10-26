@@ -12,6 +12,9 @@ export interface NewCalendarEntryInput {
   category: string;
 }
 
+/** Supabase's default row cap per request. */
+const PAGE_SIZE = 1000;
+
 /** Per-member schedule items that overlay the shared calendar. */
 export function useCalendarEntries(ready = true) {
   const [entries, setEntries] = useState<CalendarEntry[]>([]);
@@ -20,16 +23,27 @@ export function useCalendarEntries(ready = true) {
 
   const load = useCallback(async () => {
     if (!isSupabaseConfigured) return;
-    const { data, error: err } = await getSupabase()
-      .from("family_calendar_entries")
-      .select("*")
-      .order("start_time");
+    // Supabase hands back at most 1000 rows per request, and a few synced
+    // calendars pass that quickly — read in pages so the tail isn't dropped.
+    const all: CalendarEntry[] = [];
+    for (let offset = 0; ; offset += PAGE_SIZE) {
+      const { data, error: err } = await getSupabase()
+        .from("family_calendar_entries")
+        .select("*")
+        .order("start_time")
+        .order("id") // a stable tiebreak, or rows can repeat or vanish across pages
+        .range(offset, offset + PAGE_SIZE - 1);
 
-    if (err) setError(err.message);
-    else {
-      setEntries((data ?? []) as CalendarEntry[]);
-      setError(null);
+      if (err) {
+        setError(err.message);
+        setLoading(false);
+        return;
+      }
+      all.push(...((data ?? []) as CalendarEntry[]));
+      if (!data || data.length < PAGE_SIZE) break;
     }
+    setEntries(all);
+    setError(null);
     setLoading(false);
   }, []);
 
