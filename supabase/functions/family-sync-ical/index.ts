@@ -16,8 +16,14 @@ import ICAL from "https://esm.sh/ical.js@2.2.0";
 
 const WINDOW_BACK_DAYS = 30;
 const WINDOW_FORWARD_DAYS = 365;
-/** Guards against a malformed infinite RRULE. */
+/** Occurrences kept per series, counted inside the window only. */
 const MAX_OCCURRENCES_PER_EVENT = 400;
+/**
+ * Guards against a malformed infinite RRULE. Counts every step, including the
+ * ones before the window — a daily series begun years ago has thousands of
+ * those, which is why it cannot share the cap above.
+ */
+const MAX_ITERATIONS_PER_EVENT = 20_000;
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -46,6 +52,15 @@ function normaliseUrl(raw: string): string {
   return raw.trim().replace(/^webcal:\/\//i, "https://");
 }
 
+/**
+ * All-day dates are stored as UTC midnight, and the app reads their day back
+ * in UTC. `toJSDate()` would use the runtime's own zone, which only happens to
+ * be UTC on Supabase.
+ */
+function toStart(t: InstanceType<typeof ICAL.Time>, allDay: boolean): Date {
+  return allDay ? new Date(Date.UTC(t.year, t.month - 1, t.day)) : t.toJSDate();
+}
+
 function parseIcs(ics: string, from: Date, to: Date): ParsedEvent[] {
   const comp = new ICAL.Component(ICAL.parse(ics));
   const out: ParsedEvent[] = [];
@@ -65,7 +80,7 @@ function parseIcs(ics: string, from: Date, to: Date): ParsedEvent[] {
     const allDay = Boolean(event.startDate.isDate);
 
     if (!event.isRecurring()) {
-      const start = event.startDate.toJSDate();
+      const start = toStart(event.startDate, allDay);
       if (start >= from && start <= to) {
         out.push({
           uid,
@@ -81,12 +96,14 @@ function parseIcs(ics: string, from: Date, to: Date): ParsedEvent[] {
 
     // Expand the series, but only across the window we actually display.
     const iterator = event.iterator();
+    let steps = 0;
     let count = 0;
     for (let next = iterator.next(); next; next = iterator.next()) {
-      if (++count > MAX_OCCURRENCES_PER_EVENT) break;
-      const start = next.toJSDate();
+      if (++steps > MAX_ITERATIONS_PER_EVENT) break;
+      const start = toStart(next, allDay);
       if (start > to) break;
       if (start < from) continue;
+      if (++count > MAX_OCCURRENCES_PER_EVENT) break;
 
       let end: Date | null = null;
       try {

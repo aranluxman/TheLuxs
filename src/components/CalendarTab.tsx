@@ -103,7 +103,10 @@ function buildAgenda(
       kind: "entry",
       title: c.title,
       subtitle: c.category === "general" ? null : c.category,
-      day: dayKey(start),
+      // An all-day import is stored as UTC midnight of its date, so its day is
+      // read in UTC on purpose: in Toronto, 29 Oct 00:00Z is the evening of the
+      // 28th, and a local read files the event a day early.
+      day: c.all_day ? start.toISOString().slice(0, 10) : dayKey(start),
       // All-day imports have no meaningful clock time.
       start: c.all_day ? null : start,
       end: c.all_day ? null : c.end_time ? parseISO(c.end_time) : null,
