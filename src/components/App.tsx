@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import dynamic from "next/dynamic";
+import { classifyDbError } from "@/lib/dbErrorHint";
 import { MEMBER_STORAGE_KEY } from "@/lib/member";
 import { isSupabaseConfigured } from "@/lib/supabase";
 import { AppIconProvider } from "./AppIconProvider";
@@ -81,12 +82,49 @@ function MissingConfig() {
       <p className="text-muted mt-3 text-sm">
         This build was made without <code className="font-mono">NEXT_PUBLIC_SUPABASE_URL</code> and{" "}
         <code className="font-mono">NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY</code>. Add them to{" "}
-        <code className="font-mono">.env.local</code> (or to your Cloudflare Pages build
-        settings) and rebuild. The values are inlined at build time, so restarting alone
-        will not pick them up.
+        <code className="font-mono">.env.local</code> (or, for Cloudflare Pages builds, to the{" "}
+        <code className="font-mono">[vars]</code> section of{" "}
+        <code className="font-mono">wrangler.toml</code>) and rebuild. The values are inlined
+        at build time, so restarting alone will not pick them up.
       </p>
     </main>
   );
+}
+
+function DbErrorHint({ message }: { message: string }) {
+  const code = (s: string) => <code className="font-mono">{s}</code>;
+  switch (classifyDbError(message)) {
+    case "key":
+      return (
+        <p className="text-muted mt-3 text-sm">
+          Supabase rejected this build&rsquo;s API key. Copy the publishable key from the
+          project in {code("NEXT_PUBLIC_SUPABASE_URL")} (Project Settings &rarr; API Keys) into{" "}
+          {code("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY")}, then rebuild and redeploy &mdash; the
+          key is inlined at build time.
+        </p>
+      );
+    case "schema":
+      return (
+        <p className="text-muted mt-3 text-sm">
+          The tables are missing. Run the migrations in {code("supabase/migrations")} against
+          this project, in order.
+        </p>
+      );
+    case "network":
+      return (
+        <p className="text-muted mt-3 text-sm">
+          The request never reached Supabase. Check the connection, and that the project
+          isn&rsquo;t paused in the Supabase dashboard.
+        </p>
+      );
+    default:
+      return (
+        <p className="text-muted mt-3 text-sm">
+          Check the Supabase URL and key this build was made with, and that the migrations in{" "}
+          {code("supabase/migrations")} have been run against that project.
+        </p>
+      );
+  }
 }
 
 function Gate() {
@@ -109,10 +147,7 @@ function Gate() {
       <main className="mx-auto w-full max-w-lg px-6 py-20">
         <h1 className="text-xl font-semibold">Couldn&rsquo;t reach the database</h1>
         <p className="text-muted mt-3 text-sm">{error}</p>
-        <p className="text-muted mt-3 text-sm">
-          Check that the migration in <code className="font-mono">supabase/migrations</code>{" "}
-          has been run against this project.
-        </p>
+        <DbErrorHint message={error} />
       </main>
     );
   }
