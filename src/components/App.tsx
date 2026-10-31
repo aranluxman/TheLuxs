@@ -82,10 +82,9 @@ function MissingConfig() {
       <p className="text-muted mt-3 text-sm">
         This build was made without <code className="font-mono">NEXT_PUBLIC_SUPABASE_URL</code> and{" "}
         <code className="font-mono">NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY</code>. Add them to{" "}
-        <code className="font-mono">.env.local</code> (or, for Cloudflare Pages builds, to the{" "}
-        <code className="font-mono">[vars]</code> section of{" "}
-        <code className="font-mono">wrangler.toml</code>) and rebuild. The values are inlined
-        at build time, so restarting alone will not pick them up.
+        <code className="font-mono">.env.local</code> (or to your Cloudflare Pages build
+        settings) and rebuild. The values are inlined at build time, so restarting alone
+        will not pick them up.
       </p>
     </main>
   );
